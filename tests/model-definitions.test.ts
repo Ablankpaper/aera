@@ -9,6 +9,22 @@ import {
 import { tmpdir } from "os";
 import { join } from "path";
 
+const testState = vi.hoisted(() => ({ testHome: "" }));
+
+// The catalog is dynamically imported after each test creates an isolated
+// HERMES_HOME. These explicit original-module mocks prevent a manual mock left
+// in a reused Vitest worker from replacing one link in the managed-file module
+// graph. The installer override remains live through the getter.
+vi.mock("../src/main/installer", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/main/installer")>();
+  return {
+    ...actual,
+    get HERMES_HOME() {
+      return testState.testHome;
+    },
+  };
+});
+
 /**
  * Shared model definitions: per-model-id metadata (context window, display name,
  * capabilities) defined once and merged onto every provider attachment of that
@@ -23,11 +39,19 @@ async function loadModels(): Promise<{
   write<T>(callback: () => T | Promise<T>): Promise<T>;
 }> {
   vi.resetModules();
+  // This suite dynamically imports the real model catalog. Clear worker-level
+  // mocks from preceding test files before resolving HERMES_HOME and the
+  // managed-write boundary.
+  testState.testHome = testHome;
   vi.stubEnv("HERMES_HOME", testHome);
   const [models, managed, authority] = await Promise.all([
-    import("../src/main/models"),
-    import("../src/main/model-configuration-managed-files"),
-    import("../src/main/model-configuration-write-authority"),
+    vi.importActual<typeof import("../src/main/models")>("../src/main/models"),
+    vi.importActual<
+      typeof import("../src/main/model-configuration-managed-files")
+    >("../src/main/model-configuration-managed-files"),
+    vi.importActual<
+      typeof import("../src/main/model-configuration-write-authority")
+    >("../src/main/model-configuration-write-authority"),
   ]);
   managed.registerManagedModelFileRoots({ globalRoot: testHome, profiles: {} });
   const writeAuthority = new authority.ModelConfigurationWriteAuthority();
