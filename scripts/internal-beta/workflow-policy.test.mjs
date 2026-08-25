@@ -160,6 +160,11 @@ test("CI exposes one bounded Windows Runtime Seed install diagnostic", async () 
   );
   assert.equal(diagnostic["runs-on"], "windows-2025");
   assert.equal(
+    diagnostic["timeout-minutes"],
+    20,
+    "diagnostic job must preserve enough time for one packaged launch and bounded cleanup",
+  );
+  assert.equal(
     diagnostic.environment,
     "internal-beta",
     "diagnostic must use the same protected build environment as the candidate",
