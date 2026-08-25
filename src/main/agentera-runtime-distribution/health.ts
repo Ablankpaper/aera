@@ -4,7 +4,8 @@ import { dirname, join } from "node:path";
 
 import type { RuntimeManifest } from "./manifest";
 
-const HEALTH_TIMEOUT_MS = 45_000;
+const POSIX_HEALTH_TIMEOUT_MS = 45_000;
+const WINDOWS_HEALTH_TIMEOUT_MS = 120_000;
 const HEALTH_MAX_OUTPUT_BYTES = 1024 * 1024;
 const REQUIRED_IMPORTS = [
   "hermes_cli.main",
@@ -175,9 +176,14 @@ export async function runIsolatedRuntimeHealthCheck({
   sandboxParent,
   signal,
   runner = defaultRunner,
-  timeoutMs = HEALTH_TIMEOUT_MS,
+  timeoutMs,
 }: RuntimeHealthCheckOptions): Promise<RuntimeHealthCheckResult> {
-  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
+  const probeTimeoutMs =
+    timeoutMs ??
+    (manifest.platform === "windows"
+      ? WINDOWS_HEALTH_TIMEOUT_MS
+      : POSIX_HEALTH_TIMEOUT_MS);
+  if (!Number.isSafeInteger(probeTimeoutMs) || probeTimeoutMs <= 0) {
     throw new RuntimeHealthError("Runtime health timeout must be positive");
   }
   const python = join(runtimeRoot, ...manifest.entrypoints.python.split("/"));
@@ -230,7 +236,7 @@ export async function runIsolatedRuntimeHealthCheck({
       const result = await runner(python, args, {
         cwd: runtimeRoot,
         env,
-        timeoutMs,
+        timeoutMs: probeTimeoutMs,
         signal,
       });
       if (index === 0) versionOutput = result.stdout.trim();

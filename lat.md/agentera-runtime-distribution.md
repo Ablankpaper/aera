@@ -192,6 +192,8 @@ Each macOS and Windows Internal Beta job launches the exact packaged Electron ex
 
 [[tests/e2e/agentera-runtime-contract.e2e.ts]] follows `current.json` to the installed manifest, requires its SHA-256 to equal the packaged Seed manifest SHA-256, hashes the installed Python and Hermes entrypoint, starts the real Gateway, binds its PID and listening port to that Python, and requires `request_tool_policy` plus `request_model_route`. The emitted candidate evidence contains only bounded identities, hashes, PID, port, and capabilities; it excludes local paths and credentials.
 
+[[src/main/agentera-runtime-distribution/health.ts#runIsolatedRuntimeHealthCheck]] keeps every offline version, command-surface, and required-import probe fail-closed. Windows receives a bounded 120-second cold-start allowance because Defender can keep a newly extracted 14k-entry Runtime busy after inventory verification; macOS and Linux remain bounded at 45 seconds, and explicit test timeouts still override either platform default.
+
 ## Independent verification
 
 The main process verifies canonical manifest bytes, Ed25519 trust, signed context, archive size, and SHA-256 before accepting a Runtime artifact.
