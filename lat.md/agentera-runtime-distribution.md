@@ -192,7 +192,7 @@ The gate proves stable conversations, background learning, next-conversation rec
 
 Each macOS and Windows Internal Beta job launches the exact packaged Electron executable in an isolated data root and installs only the Seed inside that same package.
 
-[[tests/e2e/agentera-runtime-contract.e2e.ts]] follows `current.json` to the installed manifest, requires its SHA-256 to equal the packaged Seed manifest SHA-256, hashes the installed Python and Hermes entrypoint, starts the real Gateway, binds its PID and listening port to that Python, and requires `request_tool_policy` plus `request_model_route`. The emitted candidate evidence contains only bounded identities, hashes, PID, port, and capabilities; it excludes local paths and credentials.
+[[tests/e2e/agentera-runtime-contract.e2e.ts]] follows `current.json` to the installed manifest, requires its SHA-256 to equal the packaged Seed manifest SHA-256, hashes the installed Python and Hermes entrypoint, starts the real Gateway, binds its PID and listening port to that Python, and requires `request_tool_policy` plus `request_model_route`. The emitted candidate evidence contains only bounded identities, hashes, PID, port, and capabilities; it excludes local paths and credentials. The Windows first-install test has a ten-minute per-test bound because signed extraction of the 14k-entry Seed varies with Defender and hosted-runner storage; this is a test-gate budget, not an application timeout.
 
 ### Windows Seed install timing diagnostic
 

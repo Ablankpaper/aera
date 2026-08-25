@@ -255,6 +255,10 @@ test.afterEach(async () => {
 // Playwright requires its fixtures argument to use object destructuring.
 // eslint-disable-next-line no-empty-pattern
 test("packaged Electron runs its installed locked Runtime and advertises Agent request contracts", async ({}) => {
+  // Windows Defender and hosted-runner storage can make the signed 14k-entry
+  // first extraction take several minutes. Keep this gate bounded, but do not
+  // mistake the default 240s Playwright limit for an installer timeout.
+  test.setTimeout(600_000);
   const executablePath = requiredEnvironment("AGENTERA_E2E_EXECUTABLE_PATH");
   const seedDirectory = requiredEnvironment("AGENTERA_RUNTIME_SEED_DIR");
   const evidenceOutput = requiredEnvironment(
