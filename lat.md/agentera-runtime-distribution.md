@@ -200,6 +200,12 @@ A manual Windows-only CI mode isolates the locked Seed installer from packaging 
 
 [[tests/runtime-seed-install-live-diagnostic.test.ts]] runs only when explicitly enabled, records path-free progress and individual health-probe timings, aborts after a bounded deadline, and removes its isolated Runtime root. The same job builds only an unpacked Electron app with the protected `internal-beta` environment and the candidate's public configuration contract, then records the Renderer-visible installation stage through [[tests/e2e/agentera-runtime-contract.e2e.ts]]. Its optional credential-free inventory trace distinguishes parent spawn, helper entry, directory walk, content hashing, and structured-result return without recording paths or manifest contents. The job does not create candidate containers, and full CI or candidate validation cannot treat this diagnostic-only run as release evidence.
 
+#### Packaged health probe diagnostics
+
+Diagnostic Electron runs record each isolated Python probe and sandbox-cleanup boundary so a single bounded Windows run can distinguish command failure, timeout, and cleanup delay without exposing Runtime paths or credentials.
+
+[[src/main/agentera-runtime-distribution/health.ts#runIsolatedRuntimeHealthCheck]] writes only when explicit E2E diagnostics and an absolute evidence path are both present. Each event contains a probe label, executable basename, duration, bounded process outcome, and a classified, redacted stderr tail; normal installation results and health requirements remain unchanged.
+
 ## Independent verification
 
 The main process verifies canonical manifest bytes, Ed25519 trust, signed context, archive size, and SHA-256 before accepting a Runtime artifact.
