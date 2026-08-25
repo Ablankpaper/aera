@@ -3716,7 +3716,7 @@ export async function sendMessage(
 
   const needsBoundCapabilities = Boolean(
     envelope?.requireBoundApiTransport &&
-      (envelope.toolPolicy || execution?.routeMode === "dynamic"),
+    (envelope.toolPolicy || execution?.routeMode === "dynamic"),
   );
   const boundCapabilities = needsBoundCapabilities
     ? await prepareBoundAgentCapabilities(profile)
@@ -4334,6 +4334,16 @@ export function startGateway(profile?: string): boolean {
 const DEFAULT_GATEWAY_READY_TIMEOUT_MS = 90_000;
 const GATEWAY_STDERR_TAIL_BYTES = 4096;
 
+function gatewayReadinessDiagnostic(
+  event: string,
+  fields: Readonly<Record<string, boolean | number | string | null>> = {},
+): void {
+  if (process.env.AGENTERA_E2E_DIAGNOSTICS !== "1") return;
+  // Acceptance diagnostics are deliberately path-free and credential-free.
+  // They must remain useful even when the IPC never returns to Playwright.
+  console.error(`[gateway-readiness] ${JSON.stringify({ event, ...fields })}`);
+}
+
 function gatewayReadyTimeoutMs(): number {
   const override = Number(process.env.AERA_GATEWAY_READY_TIMEOUT_MS);
   return Number.isFinite(override) && override > 0
@@ -4459,6 +4469,12 @@ export async function startGatewayWithReadiness(
   const pollMs = options.pollMs ?? 500;
   const probeKey =
     prepared?.key ?? preparedGatewayKeys.get(profileKey(profile));
+  const readinessStartedAt = Date.now();
+  gatewayReadinessDiagnostic("wait-start", {
+    wrapperPid: startResult.diagnostics?.pid ?? null,
+    alreadyRunning: startResult.alreadyRunning === true,
+    timeoutMs: readyTimeoutMs,
+  });
   const serving = await waitForGatewayServing(
     profile,
     readyTimeoutMs,
@@ -4469,6 +4485,11 @@ export async function startGatewayWithReadiness(
     // stale-pid rejection only applies to a launch this call made.
     startResult.alreadyRunning ? null : preLaunchPid,
   );
+  gatewayReadinessDiagnostic("wait-complete", {
+    ready: serving.ready,
+    listenerPid: serving.listenerPid,
+    elapsedMs: Date.now() - readinessStartedAt,
+  });
 
   if (serving.ready) {
     setApiCacheFor(profile, true);
@@ -4519,10 +4540,21 @@ export async function startGatewayWithReadiness(
     ) {
       targets.push({ kind: "pid", pid: serving.listenerPid });
     }
+    gatewayReadinessDiagnostic("cleanup-plan", {
+      targetCount: targets.length,
+      wrapperPid: launchProc?.pid ?? null,
+      listenerPid: serving.listenerPid,
+    });
     const remainingPids: number[] = [];
     let forced = false;
     let cleanupFailed = false;
     for (const target of targets) {
+      const targetPid =
+        target.kind === "child" ? (target.proc.pid ?? null) : target.pid;
+      gatewayReadinessDiagnostic("cleanup-target-start", {
+        kind: target.kind,
+        pid: targetPid,
+      });
       try {
         const terminationOptions = {
           // Only the wrapper is spawned as a dedicated POSIX process group.
@@ -4545,10 +4577,14 @@ export async function startGatewayWithReadiness(
             : await terminateProcessTreeByPid(target.pid, terminationOptions);
         forced ||= result.forced;
         remainingPids.push(...result.remainingPids);
+        gatewayReadinessDiagnostic("cleanup-target-complete", {
+          kind: target.kind,
+          pid: targetPid,
+          forced: result.forced,
+          remainingPidCount: result.remainingPids.length,
+        });
       } catch (cleanupError) {
         cleanupFailed = true;
-        const targetPid =
-          target.kind === "child" ? target.proc.pid : target.pid;
         const stillAlive =
           typeof targetPid === "number" &&
           (target.kind === "child"
@@ -4557,6 +4593,14 @@ export async function startGatewayWithReadiness(
         if (stillAlive && typeof targetPid === "number") {
           remainingPids.push(targetPid);
         }
+        gatewayReadinessDiagnostic("cleanup-target-failed", {
+          kind: target.kind,
+          pid: targetPid,
+          failure:
+            cleanupError instanceof Error
+              ? cleanupError.name.slice(0, 80)
+              : "unknown",
+        });
         console.error(
           `[gateway:${key}] Never-ready gateway cleanup failed:`,
           cleanupError instanceof Error

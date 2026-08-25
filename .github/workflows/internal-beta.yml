@@ -719,19 +719,37 @@ jobs:
           }
 
       - name: Verify live packaged Runtime contract
+        id: runtime_contract
         shell: pwsh
         run: |
           $unpacked = @(Get-ChildItem dist -Directory | Where-Object { $_.Name -like "*unpacked" })
           if ($unpacked.Count -ne 1) { throw "Expected exactly one unpacked Windows app" }
+          $evidence = Join-Path $env:RUNNER_TEMP "runtime-contract-diagnostics"
+          New-Item -ItemType Directory -Force -Path $evidence | Out-Null
           $env:AGENTERA_E2E_EXECUTABLE_PATH = Join-Path $unpacked[0].FullName "Aera.exe"
           $env:AGENTERA_RUNTIME_SEED_DIR = Join-Path $unpacked[0].FullName "resources/agentera-runtime-seed"
           $env:AGENTERA_E2E_RUNTIME_CONTRACT_OUTPUT = Join-Path $env:RUNNER_TEMP "packaged-runtime-contract-windows.json"
+          $env:AGENTERA_E2E_RUNTIME_CONTRACT_DIAGNOSTIC_OUTPUT = Join-Path $evidence "events.jsonl"
           $env:AGENTERA_E2E_SOURCE_SHA = "${{ inputs.source_sha }}"
-          npx playwright test tests/e2e/agentera-runtime-contract.e2e.ts
+          npx playwright test tests/e2e/agentera-runtime-contract.e2e.ts 2>&1 | `
+            Tee-Object -FilePath (Join-Path $evidence "playwright.log")
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if (-not (Test-Path -LiteralPath $env:AGENTERA_E2E_RUNTIME_CONTRACT_OUTPUT -PathType Leaf)) {
             throw "Packaged Windows Runtime contract evidence is missing"
           }
+
+      - name: Preserve failed Windows Runtime contract diagnostics
+        if: ${{ always() && steps.runtime_contract.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-runtime-contract-diagnostics-${{ inputs.source_sha }}
+          path: |
+            ${{ runner.temp }}/runtime-contract-diagnostics
+            ${{ runner.temp }}/packaged-runtime-contract-windows.json
+            test-results
+          if-no-files-found: warn
+          retention-days: 14
+          compression-level: 0
 
       - name: Record path-free Windows collector identity
         shell: pwsh
