@@ -148,6 +148,35 @@ it("bounds and overlaps final Runtime inventory hashes", async () => {
   expect(maximum).toBe(8);
 });
 
+it("supports a separately bounded Windows inventory hash pool", async () => {
+  const { verifyRuntimeFileHashes } =
+    await import("../src/main/agentera-runtime-distribution/inventory");
+  const checks = Array.from({ length: 64 }, (_, index) => ({
+    physicalPath: `/runtime/file-${index}.bin`,
+    relativePath: `file-${index}.bin`,
+    expectedSha256: "a".repeat(64),
+    size: 1,
+  }));
+  let active = 0;
+  let maximum = 0;
+
+  await expect(
+    verifyRuntimeFileHashes(
+      checks,
+      undefined,
+      async () => {
+        active += 1;
+        maximum = Math.max(maximum, active);
+        await new Promise<void>((resolve) => setTimeout(resolve, 5));
+        active -= 1;
+        return "a".repeat(64);
+      },
+      32,
+    ),
+  ).resolves.toBeUndefined();
+  expect(maximum).toBe(32);
+});
+
 it("uses one bounded read for small Windows Runtime entries", async () => {
   const { verifyExtractedRuntimeInventoryInProcess } =
     await import("../src/main/agentera-runtime-distribution/inventory");

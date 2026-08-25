@@ -19,6 +19,7 @@ import {
 
 export const MAX_SYMLINK_TARGET_BYTES = 16 * 1024;
 const RUNTIME_HASH_CONCURRENCY = 8;
+const RUNTIME_WINDOWS_HASH_CONCURRENCY = 32;
 const RUNTIME_HASH_BUFFER_BYTES = 1024 * 1024;
 // Most Runtime entries are tiny Python/package metadata files.  Reading those
 // through one bounded original-fs operation avoids thousands of open/read/close
@@ -302,14 +303,20 @@ export async function verifyRuntimeFileHashes(
   checks: readonly RuntimeFileHashCheck[],
   signal?: AbortSignal,
   fileHasher: RuntimeFileHasher = hashFile,
+  concurrency = RUNTIME_HASH_CONCURRENCY,
 ): Promise<void> {
+  if (!Number.isSafeInteger(concurrency) || concurrency < 1) {
+    throw new RuntimeExtractionError(
+      "Runtime inventory hash concurrency must be a positive integer",
+    );
+  }
   for (
     let offset = 0;
     offset < checks.length;
-    offset += RUNTIME_HASH_CONCURRENCY
+    offset += concurrency
   ) {
     throwIfAborted(signal);
-    const batch = checks.slice(offset, offset + RUNTIME_HASH_CONCURRENCY);
+    const batch = checks.slice(offset, offset + concurrency);
     const results = await Promise.allSettled(
       batch.map(async (check) => {
         if (
@@ -543,6 +550,7 @@ export async function verifyExtractedRuntimeInventoryInProcess(
             inventoryFileSystem.open,
             size,
           ),
+    hostPlatform === "win32" ? RUNTIME_WINDOWS_HASH_CONCURRENCY : undefined,
   );
   onDiagnostic?.("inventory-hash-complete");
   return { fileCount, extractedBytes };
