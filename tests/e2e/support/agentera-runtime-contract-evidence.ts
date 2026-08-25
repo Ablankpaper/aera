@@ -1,11 +1,13 @@
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { readFile, realpath } from "node:fs/promises";
+import { open, readFile, realpath } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
 const COMMIT_PATTERN = /^[0-9a-f]{40}$/u;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/u;
 const VERSION_DIRECTORY_PATTERN = /^[0-9A-Za-z][0-9A-Za-z._-]{0,254}$/u;
+const GATEWAY_DIAGNOSTIC_READ_BYTES = 16_384;
+const GATEWAY_DIAGNOSTIC_MAX_CHARS = 4_096;
 
 interface CurrentPointer {
   runtimeVersion: string;
@@ -51,6 +53,23 @@ export interface LiveGatewayProcessEvidence {
   executable: string;
   command: string;
 }
+
+export interface GatewayPidFileEvidence {
+  status: "invalid" | "missing" | "unreadable" | "valid";
+  pid: number | null;
+}
+
+export type LiveGatewayProcessInspectionFailure =
+  | "command_executable_mismatch"
+  | "executable_mismatch"
+  | "pid_file_missing"
+  | "pid_file_unreadable"
+  | "pid_record_invalid"
+  | "process_identity_invalid"
+  | "process_identity_unavailable"
+  | "process_missing"
+  | "process_query_failed"
+  | "unexpected";
 
 export interface RuntimeProcessIdentity {
   executable: string;
@@ -390,6 +409,165 @@ function commandExecutable(command: string): string | null {
   return command.match(/^(\S+)(?:\s|$)/u)?.[1] ?? null;
 }
 
+function errorCode(error: unknown): string | null {
+  if (!error || typeof error !== "object") return null;
+  const value = (error as { code?: unknown }).code;
+  return typeof value === "string" ? value : null;
+}
+
+function parseGatewayPidRecord(raw: string): number | null {
+  try {
+    const parsed = raw.startsWith("{")
+      ? (record(JSON.parse(raw) as unknown, "Gateway PID record")
+          .pid as unknown)
+      : Number(raw);
+    return Number.isSafeInteger(parsed) && Number(parsed) > 0
+      ? Number(parsed)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function inspectGatewayPidFile(
+  hermesHome: string,
+): Promise<GatewayPidFileEvidence> {
+  let raw: string;
+  try {
+    raw = (await readFile(join(hermesHome, "gateway.pid"), "utf8")).trim();
+  } catch (error) {
+    return {
+      status: errorCode(error) === "ENOENT" ? "missing" : "unreadable",
+      pid: null,
+    };
+  }
+  const pid = parseGatewayPidRecord(raw);
+  return pid === null
+    ? { status: "invalid", pid: null }
+    : { status: "valid", pid };
+}
+
+export function classifyLiveGatewayProcessInspectionError(
+  error: unknown,
+): LiveGatewayProcessInspectionFailure {
+  const message = error instanceof Error ? error.message : "";
+  switch (message) {
+    case "Gateway PID file is missing":
+      return "pid_file_missing";
+    case "Gateway PID file is unreadable":
+      return "pid_file_unreadable";
+    case "Gateway PID record is invalid":
+      return "pid_record_invalid";
+    case "Live Runtime process identity is unavailable":
+      return "process_identity_unavailable";
+    case "Live Runtime process identity is invalid":
+      return "process_identity_invalid";
+    case "Live Runtime process is unavailable":
+      return "process_missing";
+    case "Windows Runtime process query failed":
+      return "process_query_failed";
+    case "Live Gateway executable differs from installed Runtime Python":
+      return "executable_mismatch";
+    case "Live Gateway is not using the installed Runtime Python":
+      return "command_executable_mismatch";
+    default:
+      return "unexpected";
+  }
+}
+
+export function parseWindowsProcessIdentityProbe(result: {
+  status: number | null;
+  stdout: string;
+}): RuntimeProcessIdentity {
+  if (result.status !== 0 || !result.stdout.trim()) {
+    throw new Error("Windows Runtime process query failed");
+  }
+  let value: Record<string, unknown>;
+  try {
+    value = record(
+      JSON.parse(result.stdout) as unknown,
+      "Live Runtime process identity",
+    );
+  } catch {
+    throw new Error("Live Runtime process identity is invalid");
+  }
+  if (value.state === "missing") {
+    throw new Error("Live Runtime process is unavailable");
+  }
+  if (value.state === "query_failed") {
+    throw new Error("Windows Runtime process query failed");
+  }
+  if (
+    value.state !== "ok" ||
+    typeof value.executable !== "string" ||
+    typeof value.command !== "string"
+  ) {
+    throw new Error("Live Runtime process identity is invalid");
+  }
+  return { executable: value.executable, command: value.command };
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+}
+
+export function redactGatewayDiagnosticTail(
+  value: string,
+  privateRoots: readonly string[],
+): string {
+  let redacted = value.replaceAll(String.fromCharCode(27), "");
+  for (const root of privateRoots) {
+    const normalized = root.trim();
+    if (!normalized) continue;
+    redacted = redacted.replace(
+      new RegExp(escapeRegExp(normalized), "giu"),
+      "<path>",
+    );
+  }
+  return redacted
+    .replace(/(["'])(?:[A-Za-z]:[\\/]|\/)[^"'\r\n]+\1/gu, "$1<path>$1")
+    .replace(/\b[A-Za-z]:[\\/][^\s"'<>|]+/gu, "<path>")
+    .replace(/(Authorization\s*:\s*Bearer\s+)[^\s]+/giu, "$1<redacted>")
+    .replace(/\b(?:sk|vck)[-_][A-Za-z0-9._-]+/gu, "<redacted>")
+    .replace(
+      /((?:api(?:[_ -]?server)?[_ -]?key|token|secret|password)\s*[=:]\s*)[^\s,;]+/giu,
+      "$1<redacted>",
+    )
+    .split("")
+    .filter((character) => {
+      const code = character.charCodeAt(0);
+      return code === 9 || code === 10 || code === 13 || code >= 32;
+    })
+    .join("")
+    .trim()
+    .slice(-GATEWAY_DIAGNOSTIC_MAX_CHARS);
+}
+
+export async function readRedactedGatewayLogTail(
+  logPath: string,
+  privateRoots: readonly string[] = [],
+): Promise<string> {
+  const handle = await open(logPath, "r");
+  try {
+    const metadata = await handle.stat();
+    const length = Math.min(metadata.size, GATEWAY_DIAGNOSTIC_READ_BYTES);
+    if (length <= 0) return "";
+    const buffer = Buffer.alloc(length);
+    const { bytesRead } = await handle.read(
+      buffer,
+      0,
+      length,
+      Math.max(0, metadata.size - length),
+    );
+    return redactGatewayDiagnosticTail(
+      buffer.subarray(0, bytesRead).toString("utf8"),
+      privateRoots,
+    );
+  } finally {
+    await handle.close();
+  }
+}
+
 async function defaultProcessIdentityReader(
   pid: number,
 ): Promise<RuntimeProcessIdentity> {
@@ -400,24 +578,14 @@ async function defaultProcessIdentityReader(
         "-NoProfile",
         "-NonInteractive",
         "-Command",
-        `$p=Get-CimInstance Win32_Process -Filter "ProcessId = ${String(pid)}"; if($null -eq $p){exit 1}; @{executable=$p.ExecutablePath;command=$p.CommandLine}|ConvertTo-Json -Compress`,
+        `try{$p=Get-CimInstance Win32_Process -Filter "ProcessId = ${String(pid)}" -ErrorAction Stop}catch{@{state='query_failed'}|ConvertTo-Json -Compress;exit 0}; if($null -eq $p){@{state='missing'}|ConvertTo-Json -Compress;exit 0}; @{state='ok';executable=$p.ExecutablePath;command=$p.CommandLine}|ConvertTo-Json -Compress`,
       ],
       { encoding: "utf8", stdio: "pipe" },
     );
-    if (result.status !== 0 || !result.stdout.trim()) {
-      throw new Error("Live Runtime process identity is unavailable");
-    }
-    const value = record(
-      JSON.parse(result.stdout) as unknown,
-      "Live Runtime process identity",
-    );
-    if (
-      typeof value.executable !== "string" ||
-      typeof value.command !== "string"
-    ) {
-      throw new Error("Live Runtime process identity is invalid");
-    }
-    return { executable: value.executable, command: value.command };
+    return parseWindowsProcessIdentityProbe({
+      status: result.status,
+      stdout: result.stdout,
+    });
   }
 
   const commandResult = spawnSync(
@@ -456,14 +624,17 @@ export async function inspectLiveGatewayProcess(
     pid: number,
   ) => Promise<RuntimeProcessIdentity> = defaultProcessIdentityReader,
 ): Promise<LiveGatewayProcessEvidence> {
-  const raw = (await readFile(join(hermesHome, "gateway.pid"), "utf8")).trim();
-  const parsed = raw.startsWith("{")
-    ? (record(JSON.parse(raw) as unknown, "Gateway PID record").pid as unknown)
-    : Number.parseInt(raw, 10);
-  if (!Number.isSafeInteger(parsed) || Number(parsed) <= 0) {
+  const pidFile = await inspectGatewayPidFile(hermesHome);
+  if (pidFile.status === "missing") {
+    throw new Error("Gateway PID file is missing");
+  }
+  if (pidFile.status === "unreadable") {
+    throw new Error("Gateway PID file is unreadable");
+  }
+  if (pidFile.status === "invalid" || pidFile.pid === null) {
     throw new Error("Gateway PID record is invalid");
   }
-  const pid = Number(parsed);
+  const pid = pidFile.pid;
   const identity = await readProcessIdentity(pid);
   const command = identity.command.trim();
   const executable = identity.executable.trim();

@@ -15,6 +15,10 @@ const workflowPath = new URL(
   "../../.github/workflows/internal-beta.yml",
   import.meta.url,
 );
+const runtimeContractTestPath = new URL(
+  "../../tests/e2e/agentera-runtime-contract.e2e.ts",
+  import.meta.url,
+);
 const productionCandidatePath = new URL(
   "../../.github/workflows/release-candidate.yml",
   import.meta.url,
@@ -716,6 +720,59 @@ test("Internal Beta candidate probes the live packaged Runtime contract on both 
   }
   assert.match(raw, /packaged-runtime-contract-macos/u);
   assert.match(raw, /packaged-runtime-contract-windows/u);
+});
+
+test("Windows packaged Runtime failures preserve bounded stage diagnostics", async () => {
+  const [raw, runtimeContractTest] = await Promise.all([
+    readFile(workflowPath, "utf8"),
+    readFile(runtimeContractTestPath, "utf8"),
+  ]);
+  const workflow = parseYAML(raw);
+  const steps = workflow.jobs.windows.steps;
+  const runtimeStep = steps.find(
+    (candidate) => candidate.name === "Verify live packaged Runtime contract",
+  );
+  assert.ok(runtimeStep, "Windows must execute the packaged Runtime contract");
+  assert.equal(runtimeStep.id, "runtime_contract");
+  assert.match(
+    runtimeStep.run,
+    /AGENTERA_E2E_RUNTIME_CONTRACT_DIAGNOSTIC_OUTPUT/u,
+  );
+  assert.match(runtimeStep.run, /Tee-Object/u);
+
+  const preserveStep = steps.find(
+    (candidate) =>
+      candidate.name === "Preserve failed Windows Runtime contract diagnostics",
+  );
+  assert.ok(preserveStep, "Windows must preserve the failed Runtime evidence");
+  assert.equal(preserveStep.uses, "actions/upload-artifact@v4");
+  assert.match(String(preserveStep.if), /always\(\)/u);
+  assert.match(String(preserveStep.if), /runtime_contract\.outcome/u);
+  assert.match(String(preserveStep.if), /failure/u);
+  assert.match(preserveStep.with.path, /runtime-contract-diagnostics/u);
+  assert.match(preserveStep.with.path, /test-results/u);
+
+  const timeoutLiteral = runtimeContractTest.match(
+    /test\.setTimeout\(([\d_]+)\)/u,
+  )?.[1];
+  assert.ok(timeoutLiteral, "the live Runtime contract needs its own budget");
+  const timeoutMs = Number(timeoutLiteral.replaceAll("_", ""));
+  assert.ok(timeoutMs >= 600_000 && timeoutMs <= 1_200_000);
+  for (const marker of [
+    "profile-bind-start",
+    "profile-bind-complete",
+    "gateway-invoke-start",
+    "gateway-invoke-heartbeat",
+    "gateway-invoke-failed",
+    "gateway-failure-snapshot",
+    "cleanup-boundary-start",
+  ]) {
+    assert.match(runtimeContractTest, new RegExp(marker, "u"));
+  }
+  assert.match(
+    runtimeContractTest,
+    /withDiagnosticTimeout\([\s\S]*?window\.hermesAPI\.startGateway\(\)[\s\S]*?180_000/u,
+  );
 });
 
 test("Internal Beta binds native inventories to every final distributable", async () => {

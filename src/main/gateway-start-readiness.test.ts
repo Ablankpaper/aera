@@ -244,6 +244,7 @@ describe("startGatewayWithReadiness", () => {
     });
     children.length = 0;
     process.env.NODE_ENV = "test";
+    delete process.env.AGENTERA_E2E_DIAGNOSTICS;
   });
 
   afterEach(() => {
@@ -253,6 +254,7 @@ describe("startGatewayWithReadiness", () => {
     stopHealthPolling();
     vi.clearAllTimers();
     vi.useRealTimers();
+    delete process.env.AGENTERA_E2E_DIAGNOSTICS;
     rmSync(TEST_HOME, { recursive: true, force: true });
   });
 
@@ -387,6 +389,46 @@ describe("startGatewayWithReadiness", () => {
     });
     expect(result.running).toBe(false);
     expect(child.exitCode).toBeNull();
+  });
+
+  it("emits path-free stages before and during timeout cleanup", async () => {
+    process.env.AGENTERA_E2E_DIAGNOSTICS = "1";
+    httpState.statusCode.value = 503;
+    spawnNext(process.pid);
+    configureGatewayProcessOwnership(TEST_OWNERSHIP_ROOT);
+    const diagnostics: string[] = [];
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation((...args: unknown[]) => {
+        const line = args.map(String).join(" ");
+        if (line.includes("[gateway-readiness]")) diagnostics.push(line);
+      });
+
+    try {
+      const promise = startGatewayWithReadiness(
+        undefined,
+        { key: "generated-internal-token", port: 8642 },
+        { readyTimeoutMs: 200, pollMs: 20 },
+      );
+      await vi.advanceTimersByTimeAsync(500);
+      await promise;
+    } finally {
+      consoleError.mockRestore();
+    }
+
+    const events = diagnostics.join("\n");
+    for (const event of [
+      "wait-start",
+      "wait-complete",
+      "cleanup-plan",
+      "cleanup-target-start",
+      "cleanup-target-complete",
+    ]) {
+      expect(events).toContain(`"event":"${event}"`);
+    }
+    expect(events).not.toContain(TEST_HOME);
+    expect(events).not.toContain(invocation.python);
+    expect(events).not.toContain("generated-internal-token");
   });
 
   it("still cleans up the listener when the wrapper exits before the deadline", async () => {

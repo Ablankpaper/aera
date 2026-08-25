@@ -6,11 +6,15 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
+  classifyLiveGatewayProcessInspectionError,
   inspectActiveGatewayProfile,
+  inspectGatewayPidFile,
   inspectInstalledRuntimeContract,
   inspectLiveGatewayProcess,
   inspectLiveGatewayEndpoint,
+  parseWindowsProcessIdentityProbe,
   probeRuntimeCapabilities,
+  readRedactedGatewayLogTail,
 } from "./agentera-runtime-contract-evidence";
 
 const SOURCE_COMMIT = "8".repeat(40);
@@ -243,8 +247,107 @@ describe("packaged Runtime contract evidence", () => {
     });
   });
 
+  it("reports bounded Gateway PID states and stable process failure classes", async () => {
+    const hermesHome = await mkdtemp(join(tmpdir(), "aera-runtime-pid-state-"));
+
+    await expect(inspectGatewayPidFile(hermesHome)).resolves.toEqual({
+      status: "missing",
+      pid: null,
+    });
+
+    await writeFile(join(hermesHome, "gateway.pid"), "not-a-pid\n");
+    await expect(inspectGatewayPidFile(hermesHome)).resolves.toEqual({
+      status: "invalid",
+      pid: null,
+    });
+
+    await writeFile(join(hermesHome, "gateway.pid"), '{"pid":4242}\n');
+    await expect(inspectGatewayPidFile(hermesHome)).resolves.toEqual({
+      status: "valid",
+      pid: 4242,
+    });
+
+    expect(
+      classifyLiveGatewayProcessInspectionError(
+        new Error("Live Runtime process identity is unavailable"),
+      ),
+    ).toBe("process_identity_unavailable");
+    expect(
+      classifyLiveGatewayProcessInspectionError(
+        new Error(
+          "Live Gateway executable differs from installed Runtime Python",
+        ),
+      ),
+    ).toBe("executable_mismatch");
+    expect(
+      classifyLiveGatewayProcessInspectionError(new Error("private detail")),
+    ).toBe("unexpected");
+  });
+
+  it("separates a missing Windows process from a failed CIM query", () => {
+    expect(() =>
+      parseWindowsProcessIdentityProbe({
+        status: 0,
+        stdout: '{"state":"missing"}',
+      }),
+    ).toThrow("Live Runtime process is unavailable");
+    expect(
+      classifyLiveGatewayProcessInspectionError(
+        new Error("Live Runtime process is unavailable"),
+      ),
+    ).toBe("process_missing");
+
+    expect(() =>
+      parseWindowsProcessIdentityProbe({
+        status: 0,
+        stdout: '{"state":"query_failed"}',
+      }),
+    ).toThrow("Windows Runtime process query failed");
+    expect(
+      classifyLiveGatewayProcessInspectionError(
+        new Error("Windows Runtime process query failed"),
+      ),
+    ).toBe("process_query_failed");
+
+    expect(
+      parseWindowsProcessIdentityProbe({
+        status: 0,
+        stdout:
+          '{"state":"ok","executable":"C:\\\\runtime\\\\python.exe","command":"C:\\\\runtime\\\\python.exe -m hermes_cli.main gateway"}',
+      }),
+    ).toEqual({
+      executable: "C:\\runtime\\python.exe",
+      command: "C:\\runtime\\python.exe -m hermes_cli.main gateway",
+    });
+  });
+
+  it("keeps only a bounded redacted Gateway stderr tail", async () => {
+    const hermesHome = await mkdtemp(join(tmpdir(), "aera-runtime-log-tail-"));
+    const logPath = join(hermesHome, "gateway-stderr.log");
+    const privatePath = "C:\\Users\\alice\\private\\runtime\\main.py";
+    const secret = "sk-private-secret-value";
+    const apiServerKey = "plain-private-runtime-token";
+    await writeFile(
+      logPath,
+      `${"old-line ".repeat(700)}\nFile "${privatePath}"\nAuthorization: Bearer ${secret}\nAPI_SERVER_KEY=${apiServerKey}\nModuleNotFoundError: No module named gateway\n`,
+    );
+
+    const tail = await readRedactedGatewayLogTail(logPath, [hermesHome]);
+
+    expect(tail.length).toBeLessThanOrEqual(4096);
+    expect(tail).toContain("ModuleNotFoundError");
+    expect(tail).not.toContain(privatePath);
+    expect(tail).not.toContain(hermesHome);
+    expect(tail).not.toContain(secret);
+    expect(tail).not.toContain(apiServerKey);
+    expect(tail).toContain("<path>");
+    expect(tail).toContain("<redacted>");
+  });
+
   it("accepts the canonical Python target when the locked executable is a symlink", async () => {
-    const hermesHome = await mkdtemp(join(tmpdir(), "aera-runtime-process-link-"));
+    const hermesHome = await mkdtemp(
+      join(tmpdir(), "aera-runtime-process-link-"),
+    );
     const runtimeBin = join(hermesHome, "runtime", "python", "bin");
     await mkdir(runtimeBin, { recursive: true });
     const canonicalPython = join(runtimeBin, "python3.11");
