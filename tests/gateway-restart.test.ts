@@ -627,9 +627,14 @@ describe("restartGatewayViaCli", () => {
     realGatewayPids.add(spawnedPid);
 
     configureGatewayProcessOwnership(TEST_HOME);
+    // Windows terminates a Node child synchronously for SIGTERM, so cold
+    // recovery can finish and clear the durable record in the same call. POSIX
+    // keeps the target alive until the bounded termination timer observes the
+    // exit; both outcomes are safe, but only the latter remains ambiguous at
+    // this API boundary.
     expect(recoverAeraOwnedGatewaysFromPreviousRun()).toEqual({
       reapedProfiles: [],
-      ambiguousProfiles: ["work"],
+      ambiguousProfiles: process.platform === "win32" ? [] : ["work"],
     });
 
     expect(await waitForProcessExit(spawnedPid, 3000)).toBe(true);
