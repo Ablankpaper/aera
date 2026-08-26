@@ -170,6 +170,68 @@ async function harness(
 }
 
 describe("Aera Runtime distribution manager", () => {
+  it("shares an in-flight startup recovery between initialize and getState", async () => {
+    const setup = await harness();
+    const journal = await setup.store.readState();
+    let release!: (value: typeof journal) => void;
+    const recovery = new Promise<typeof journal>((resolve) => {
+      release = resolve;
+    });
+    const recover = vi.spyOn(setup.store, "recover").mockReturnValue(recovery);
+    const manager = createRuntimeDistributionManager(setup.options);
+
+    const initialized = manager.initialize();
+    const observed = manager.getState();
+
+    await Promise.resolve();
+    expect(recover).toHaveBeenCalledOnce();
+
+    release(journal);
+    await expect(Promise.all([initialized, observed])).resolves.toSatisfy(
+      ([first, second]) =>
+        first.phase === "current" &&
+        second.phase === "current" &&
+        first.currentVersion === second.currentVersion,
+    );
+  });
+
+  // @lat: [[agentera-runtime-distribution#Offline Seed installation and repair]]
+  it("waits for startup recovery before synchronizing a concurrent Seed repair", async () => {
+    const repair = vi.fn();
+    const setup = await harness({ repair });
+    const startupJournal = await setup.store.readState();
+    let release!: (value: typeof startupJournal) => void;
+    const recovery = new Promise<typeof startupJournal>((resolve) => {
+      release = resolve;
+    });
+    const recover = vi.spyOn(setup.store, "recover").mockReturnValue(recovery);
+    const manager = createRuntimeDistributionManager(setup.options);
+
+    const initializing = manager.initialize();
+    const repairedVersion = "seed-repair-v1";
+    await mkdir(join(setup.paths.versions, repairedVersion));
+    await setup.store.setCurrent({
+      ...pointer(repairedVersion),
+      runtimeVersion: "0.18.0-agentera.9",
+      sourceCommit: "c".repeat(40),
+      manifestSha256: "d".repeat(64),
+      installedAt: "2026-07-18T13:30:00.000Z",
+    });
+
+    const synchronizing = manager.retryRepair();
+    release(startupJournal);
+
+    await expect(synchronizing).resolves.toMatchObject({
+      phase: "current",
+      currentVersion: "0.18.0-agentera.9",
+      currentSourceCommit: "c".repeat(40),
+      packagedSeedVersion: "0.18.0-agentera.9",
+    });
+    await initializing;
+    expect(recover).toHaveBeenCalledOnce();
+    expect(repair).not.toHaveBeenCalled();
+  });
+
   it("checks only signed metadata and performs zero archive downloads", async () => {
     const setup = await harness();
     const manager = createRuntimeDistributionManager(setup.options);

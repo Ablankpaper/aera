@@ -1,7 +1,13 @@
 // @vitest-environment node
 
 import { EventEmitter } from "node:events";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import type { ChildProcess } from "node:child_process";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 
@@ -11,6 +17,7 @@ const {
   invocation,
   spawnRef,
   pidAliveRef,
+  processEvidenceRef,
   apiKeyRef,
   httpState,
   terminateRef,
@@ -34,6 +41,12 @@ const {
   spawnRef: { value: vi.fn() },
   pidAliveRef: {
     value: vi.fn((..._args: unknown[]) => false),
+  },
+  processEvidenceRef: {
+    value: vi.fn((pid: number) => ({
+      identity: `test-created-${pid}`,
+      image: "python3",
+    })),
   },
   apiKeyRef: { value: "generated-internal-token" },
   httpState: {
@@ -171,6 +184,24 @@ vi.mock("./utils", () => ({
     profile === "default" ? undefined : profile,
   getActiveProfileNameSync: vi.fn(() => undefined),
 }));
+vi.mock("./process-identity", () => ({
+  normalizeProcessImage: (value: unknown) =>
+    typeof value === "string" && value.trim()
+      ? value.trim().replaceAll("\\", "/").split("/").at(-1)!.toLowerCase()
+      : null,
+  processImageMatchesExecutable: (observed: string, expected: string) =>
+    typeof observed === "string" &&
+    typeof expected === "string" &&
+    observed.toLowerCase().replaceAll("\\", "/").split("/").at(-1) ===
+      expected.toLowerCase().replaceAll("\\", "/").split("/").at(-1),
+  processEvidenceMatches: (
+    actual: { identity: string; image: string } | null,
+    expected: { identity: string; image: string } | null,
+  ) =>
+    actual?.identity === expected?.identity &&
+    actual?.image === expected?.image,
+  readProcessIdentityEvidence: (pid: number) => processEvidenceRef.value(pid),
+}));
 vi.mock("./gateway-ports", () => ({
   ensureProfilePortAvailable: vi.fn(async () => 8642),
   getProfilePort: vi.fn(() => 8642),
@@ -191,6 +222,10 @@ vi.mock("./process-tree", () => ({
   terminateProcessTree: (...args: unknown[]) => terminateRef.value(...args),
   terminateProcessTreeByPid: (...args: unknown[]) =>
     terminatePidRef.value(...args),
+  retryCapturedProcessTermination: async () => ({
+    forced: false,
+    remainingPids: [],
+  }),
 }));
 vi.mock("./gateway-managed-config", () => ({
   prepareGatewayManagedConfiguration: vi.fn(async () => ({
@@ -201,9 +236,11 @@ vi.mock("./gateway-managed-config", () => ({
 
 import {
   configureGatewayProcessOwnership,
+  isGatewayRunning,
   startGatewayWithReadiness,
   stopHealthPolling,
 } from "./hermes";
+import { GatewayProcessOwnershipLedger } from "./gateway-process-ownership";
 
 function fakeChildProcess(pid: number): ChildProcess {
   const proc = new EventEmitter() as ChildProcess;
@@ -217,6 +254,21 @@ function fakeChildProcess(pid: number): ChildProcess {
     stdout: new EventEmitter(),
     stderr: new EventEmitter(),
   });
+  const emit = proc.emit.bind(proc);
+  proc.emit = ((event: string | symbol, ...args: unknown[]) => {
+    if (event === "close") {
+      const [code, signal] = args as [number | null, NodeJS.Signals | null];
+      Object.defineProperty(proc, "exitCode", {
+        configurable: true,
+        value: code,
+      });
+      Object.defineProperty(proc, "signalCode", {
+        configurable: true,
+        value: signal,
+      });
+    }
+    return emit(event, ...args);
+  }) as ChildProcess["emit"];
   return proc;
 }
 
@@ -230,6 +282,11 @@ describe("startGatewayWithReadiness", () => {
     spawnRef.value.mockReset();
     pidAliveRef.value.mockReset();
     pidAliveRef.value.mockReturnValue(false);
+    processEvidenceRef.value.mockReset();
+    processEvidenceRef.value.mockImplementation((pid: number) => ({
+      identity: `test-created-${pid}`,
+      image: "python3",
+    }));
     apiKeyRef.value = "generated-internal-token";
     httpState.statusCode.value = 200;
     httpState.authorizeWith.value = null;
@@ -322,6 +379,36 @@ describe("startGatewayWithReadiness", () => {
     ).toBe(true);
   });
 
+  it("persists listener identity and executable image with readiness evidence", async () => {
+    spawnNextWithPidFile(4320, 9875);
+    expectListenerAlive();
+    configureGatewayProcessOwnership(TEST_OWNERSHIP_ROOT);
+
+    const result = await startGatewayWithReadiness(undefined, {
+      key: "generated-internal-token",
+      port: 8642,
+    });
+
+    expect(result.ready).toBe(true);
+    const entries = JSON.parse(
+      readFileSync(
+        `${TEST_OWNERSHIP_ROOT}/gateway-process-ownership.json`,
+        "utf8",
+      ),
+    ).entries;
+    expect(entries).toEqual([
+      expect.objectContaining({
+        profileId: "default",
+        spawnedPid: 4320,
+        spawnedIdentity: "test-created-4320",
+        spawnedImage: "python3",
+        listenerPid: 9875,
+        listenerIdentity: "test-created-9875",
+        listenerImage: "python3",
+      }),
+    ]);
+  });
+
   it("warms the dashboard gateway only after the primary gateway is ready", async () => {
     spawnNextWithPidFile(4322, 9877);
     expectListenerAlive();
@@ -358,6 +445,22 @@ describe("startGatewayWithReadiness", () => {
     const child = spawnNext(process.pid);
     configureGatewayProcessOwnership(TEST_OWNERSHIP_ROOT);
     const warmDashboard = vi.fn();
+    const ownershipChecks: boolean[] = [];
+    terminateRef.value.mockImplementationOnce(
+      async (...args: unknown[]) => {
+        const options = args[1];
+        const verifyRootOwnership = (
+          options as { verifyRootOwnership: (pid: number) => boolean }
+        ).verifyRootOwnership;
+        ownershipChecks.push(verifyRootOwnership(process.pid));
+        processEvidenceRef.value.mockReturnValueOnce({
+          identity: `test-created-${process.pid}`,
+          image: "node",
+        });
+        ownershipChecks.push(verifyRootOwnership(process.pid));
+        return { forced: false, remainingPids: [] };
+      },
+    );
 
     const promise = startGatewayWithReadiness(
       undefined,
@@ -381,8 +484,12 @@ describe("startGatewayWithReadiness", () => {
     // leaving it alive is exactly the EBUSY / quit-timeout residue.
     expect(terminateRef.value).toHaveBeenCalledWith(
       child,
-      expect.objectContaining({ forceAfterMs: 3000 }),
+      expect.objectContaining({
+        forceAfterMs: 3000,
+        verifyRootOwnership: expect.any(Function),
+      }),
     );
+    expect(ownershipChecks).toEqual([true, false]);
     expect(result.diagnostics?.termination).toEqual({
       forced: false,
       remainingPids: [],
@@ -472,6 +579,54 @@ describe("startGatewayWithReadiness", () => {
     expect(warmDashboard).not.toHaveBeenCalled();
   });
 
+  it("cleans a listener published after the final readiness poll but before cleanup", async () => {
+    process.env.AGENTERA_E2E_DIAGNOSTICS = "1";
+    httpState.statusCode.value = 503;
+    const child = spawnNext(process.pid);
+    configureGatewayProcessOwnership(TEST_OWNERSHIP_ROOT);
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation((...args: unknown[]) => {
+        const line = args.map(String).join(" ");
+        if (!line.includes('"event":"wait-complete"')) return;
+        writeFileSync(
+          `${TEST_HOME}/gateway.pid`,
+          JSON.stringify({ pid: 9884 }),
+        );
+        pidAliveRef.value.mockImplementation(
+          (pid: unknown) => pid === 9884 || pid === process.pid,
+        );
+        Object.defineProperty(child, "exitCode", {
+          configurable: true,
+          value: 0,
+        });
+        child.emit("close", 0, null);
+      });
+
+    try {
+      const promise = startGatewayWithReadiness(
+        undefined,
+        { key: "generated-internal-token", port: 8642 },
+        { readyTimeoutMs: 200, pollMs: 20 },
+      );
+      await vi.advanceTimersByTimeAsync(500);
+      const result = await promise;
+
+      expect(result.ready).toBe(false);
+      expect(result.running).toBe(false);
+      expect(terminatePidRef.value).toHaveBeenCalledWith(
+        9884,
+        expect.objectContaining({ forceAfterMs: 3000 }),
+      );
+      expect(result.diagnostics?.termination).toEqual({
+        forced: false,
+        remainingPids: [],
+      });
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
   it("reports stopped when the wrapper exits without publishing a listener pid", async () => {
     httpState.statusCode.value = 503;
     const child = spawnNext(process.pid);
@@ -497,6 +652,74 @@ describe("startGatewayWithReadiness", () => {
       remainingPids: [],
     });
     expect(terminateRef.value).not.toHaveBeenCalled();
+  });
+
+  it("keeps the launch ambiguous when a live wrapper has no identity evidence", async () => {
+    httpState.statusCode.value = 503;
+    spawnNext(process.pid);
+    processEvidenceRef.value.mockImplementation(() => null as never);
+    configureGatewayProcessOwnership(TEST_OWNERSHIP_ROOT);
+
+    const promise = startGatewayWithReadiness(
+      undefined,
+      { key: "generated-internal-token", port: 8642 },
+      { readyTimeoutMs: 200, pollMs: 20 },
+    );
+    await vi.advanceTimersByTimeAsync(500);
+    const result = await promise;
+
+    expect(result.success).toBe(false);
+    expect(result.ready).toBe(false);
+    expect(result.running).toBe(true);
+    expect(result.diagnostics?.termination).toEqual({
+      forced: false,
+      remainingPids: [process.pid],
+    });
+    expect(terminateRef.value).not.toHaveBeenCalled();
+    expect(
+      JSON.parse(
+        readFileSync(
+          `${TEST_OWNERSHIP_ROOT}/gateway-process-ownership.json`,
+          "utf8",
+        ),
+      ).entries,
+    ).toHaveLength(1);
+  });
+
+  it("keeps a live pid-file listener ambiguous when its evidence is unavailable", async () => {
+    httpState.statusCode.value = 503;
+    const child = spawnNext(process.pid);
+    configureGatewayProcessOwnership(TEST_OWNERSHIP_ROOT);
+
+    const promise = startGatewayWithReadiness(
+      undefined,
+      { key: "generated-internal-token", port: 8642 },
+      { readyTimeoutMs: 300, pollMs: 20 },
+    );
+    queueMicrotask(() => {
+      writeFileSync(`${TEST_HOME}/gateway.pid`, JSON.stringify({ pid: 9882 }));
+      pidAliveRef.value.mockImplementation(
+        (pid: unknown) => pid === 9882 || pid === process.pid,
+      );
+      processEvidenceRef.value.mockImplementation((pid: number) =>
+        pid === 9882
+          ? (null as never)
+          : { identity: `test-created-${pid}`, image: "python3" },
+      );
+      Object.defineProperty(child, "exitCode", { value: 0 });
+      child.emit("close", 0, null);
+    });
+    await vi.advanceTimersByTimeAsync(700);
+    const result = await promise;
+
+    expect(result.success).toBe(false);
+    expect(result.ready).toBe(false);
+    expect(result.running).toBe(true);
+    expect(result.diagnostics?.termination).toEqual({
+      forced: false,
+      remainingPids: [9882],
+    });
+    expect(terminatePidRef.value).not.toHaveBeenCalled();
   });
 
   it("keeps running=true when timeout cleanup cannot be verified", async () => {
@@ -557,6 +780,11 @@ describe("startGatewayWithReadiness", () => {
     // The pid file exists but the identity probe says it is dead or not
     // Python — pidIsAliveAs stays false, so readiness never trusts it.
     spawnNextWithPidFile(process.pid, 4327);
+    processEvidenceRef.value.mockImplementation((pid: number) =>
+      pid === 4327
+        ? (null as never)
+        : { identity: `test-created-${pid}`, image: "python3" },
+    );
     configureGatewayProcessOwnership(TEST_OWNERSHIP_ROOT);
 
     const promise = startGatewayWithReadiness(
@@ -659,5 +887,101 @@ describe("startGatewayWithReadiness", () => {
       ),
     ).toBe(true);
     expect(warmDashboard).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed for an ambiguous migrated ownership record even when its PID is live", () => {
+    writeFileSync(
+      `${TEST_OWNERSHIP_ROOT}/gateway-process-ownership.json`,
+      JSON.stringify({
+        version: 1,
+        entries: [
+          {
+            launchId: "10000000-0000-4000-8000-000000000001",
+            desktopInstanceId: "10000000-0000-4000-8000-000000000002",
+            desktopPid: 100,
+            profileId: "default",
+            preLaunchPid: null,
+            spawnedPid: 9876,
+            createdAt: "2026-08-03T10:00:00.000Z",
+          },
+        ],
+      }),
+      "utf8",
+    );
+    writeFileSync(`${TEST_HOME}/gateway.pid`, JSON.stringify({ pid: 9876 }));
+    pidAliveRef.value.mockReturnValue(true);
+    configureGatewayProcessOwnership(TEST_OWNERSHIP_ROOT);
+
+    expect(isGatewayRunning()).toBe(false);
+    expect(spawnRef.value).not.toHaveBeenCalled();
+  });
+
+  it("cleans both wrapper and listener when ownership adoption fails after readiness", async () => {
+    const wrapper = spawnNextWithPidFile(process.pid, 9881);
+    expectListenerAlive();
+    configureGatewayProcessOwnership(TEST_OWNERSHIP_ROOT);
+    const adoptSpy = vi
+      .spyOn(GatewayProcessOwnershipLedger.prototype, "adoptSpawnedPid")
+      .mockImplementation(() => {
+        throw new Error("injected adoption persistence failure");
+      });
+
+    try {
+      const result = await startGatewayWithReadiness(
+        undefined,
+        { key: "generated-internal-token", port: 8642 },
+        { warmDashboard: vi.fn() },
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.ready).toBe(false);
+      expect(terminateRef.value).toHaveBeenCalledWith(
+        wrapper,
+        expect.objectContaining({ forceAfterMs: 3000 }),
+      );
+      expect(terminatePidRef.value).toHaveBeenCalledWith(
+        9881,
+        expect.objectContaining({ forceAfterMs: 3000 }),
+      );
+    } finally {
+      adoptSpy.mockRestore();
+    }
+  });
+
+  it("releases durable ownership after a verified timeout cleanup", async () => {
+    httpState.statusCode.value = 503;
+    const child = spawnNext(process.pid);
+    configureGatewayProcessOwnership(TEST_OWNERSHIP_ROOT);
+
+    const promise = startGatewayWithReadiness(
+      undefined,
+      { key: "generated-internal-token", port: 8642 },
+      { readyTimeoutMs: 300, pollMs: 20 },
+    );
+    queueMicrotask(() => {
+      writeFileSync(`${TEST_HOME}/gateway.pid`, JSON.stringify({ pid: 9883 }));
+      pidAliveRef.value.mockImplementation(
+        (pid: unknown) => pid === 9883 || pid === process.pid,
+      );
+      Object.defineProperty(child, "exitCode", { value: 0 });
+      child.emit("close", 0, null);
+    });
+    await vi.advanceTimersByTimeAsync(700);
+    const result = await promise;
+
+    expect(result.running).toBe(false);
+    expect(result.diagnostics?.termination).toEqual({
+      forced: false,
+      remainingPids: [],
+    });
+    expect(
+      JSON.parse(
+        readFileSync(
+          `${TEST_OWNERSHIP_ROOT}/gateway-process-ownership.json`,
+          "utf8",
+        ),
+      ).entries,
+    ).toEqual([]);
+    expect(existsSync(`${TEST_HOME}/gateway.pid`)).toBe(false);
   });
 });

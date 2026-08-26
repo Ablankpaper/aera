@@ -1,6 +1,6 @@
 import { EventEmitter } from "events";
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
-import { mkdirSync, readFileSync, rmSync } from "fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 
 const gatewayRecoveryTestTimeoutMs =
   process.platform === "win32" ? 20_000 : 5_000;
@@ -19,6 +19,9 @@ const {
   modelRows,
   ownershipMarkSpawnFailureRef,
   deferGatewayCloseRef,
+  publishGatewayPidOnSpawnRef,
+  nextListenerPidRef,
+  liveListenerPids,
 } = vi.hoisted(() => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const path = require("path");
@@ -66,6 +69,9 @@ const {
     }>,
     ownershipMarkSpawnFailureRef: { fail: false },
     deferGatewayCloseRef: { value: false },
+    publishGatewayPidOnSpawnRef: { value: false },
+    nextListenerPidRef: { value: 20_000 },
+    liveListenerPids: new Set<number>(),
   };
 });
 
@@ -298,6 +304,14 @@ vi.mock("child_process", () => ({
       });
       proc.stderr.pipe = vi.fn();
       spawned.push(proc);
+      if (publishGatewayPidOnSpawnRef.value && args?.includes("gateway")) {
+        const listenerPid = nextListenerPidRef.value++;
+        liveListenerPids.add(listenerPid);
+        writeFileSync(
+          `${TEST_HOME}/gateway.pid`,
+          JSON.stringify({ pid: listenerPid }),
+        );
+      }
       return proc;
     }),
   },
@@ -324,6 +338,14 @@ vi.mock("child_process", () => ({
     });
     proc.stderr.pipe = vi.fn();
     spawned.push(proc);
+    if (publishGatewayPidOnSpawnRef.value && args?.includes("gateway")) {
+      const listenerPid = nextListenerPidRef.value++;
+      liveListenerPids.add(listenerPid);
+      writeFileSync(
+        `${TEST_HOME}/gateway.pid`,
+        JSON.stringify({ pid: listenerPid }),
+      );
+    }
     return proc;
   }),
 }));
@@ -378,7 +400,12 @@ vi.mock("../src/main/ssh-tunnel", () => ({
 
 vi.mock("../src/main/utils", () => ({
   stripAnsi: (s: string) => s,
-  pidIsAliveAs: () => false,
+  pidIsAliveAs: (pid: number) =>
+    liveListenerPids.has(pid) ||
+    spawned.some(
+      (proc) =>
+        proc.pid === pid && proc.exitCode === null && proc.signalCode === null,
+    ),
   getActiveProfileNameSync: () => "default",
   normalizeProfileName: (p?: string) =>
     p === undefined || p === "" || p === "default" ? undefined : p,
@@ -387,6 +414,26 @@ vi.mock("../src/main/utils", () => ({
     home: TEST_HOME,
     envFile: `${TEST_HOME}/.env`,
     configFile: `${TEST_HOME}/config.yaml`,
+  }),
+}));
+
+vi.mock("../src/main/process-identity", () => ({
+  normalizeProcessImage: (value: unknown) =>
+    typeof value === "string" && value.trim()
+      ? value.trim().replaceAll("\\", "/").split("/").at(-1)!.toLowerCase()
+      : null,
+  processImageMatchesExecutable: (observed: string, expected: string) =>
+    observed.toLowerCase().replaceAll("\\", "/").split("/").at(-1) ===
+    expected.toLowerCase().replaceAll("\\", "/").split("/").at(-1),
+  processEvidenceMatches: (
+    actual: { identity: string; image: string } | null,
+    expected: { identity: string; image: string } | null,
+  ) =>
+    actual?.identity === expected?.identity &&
+    actual?.image === expected?.image,
+  readProcessIdentityEvidence: (pid: number) => ({
+    identity: `test-created-${pid}`,
+    image: process.execPath,
   }),
 }));
 
@@ -459,6 +506,9 @@ describe("CLI fallback session id propagation", () => {
     modelRows.length = 0;
     ownershipMarkSpawnFailureRef.fail = false;
     deferGatewayCloseRef.value = false;
+    publishGatewayPidOnSpawnRef.value = false;
+    nextListenerPidRef.value = 20_000;
+    liveListenerPids.clear();
     rmSync(TEST_REPO, { recursive: true, force: true });
   });
 
@@ -670,6 +720,7 @@ describe("CLI fallback session id propagation", () => {
   it("recovers a stopped local gateway before sending via the API", async () => {
     mkdirSync(TEST_REPO, { recursive: true });
     healthStatuses.push(503, 503, 200);
+    publishGatewayPidOnSpawnRef.value = true;
 
     const chunks: string[] = [];
     const done = new Promise<string | undefined>((resolve, reject) => {
@@ -694,6 +745,7 @@ describe("CLI fallback session id propagation", () => {
     mkdirSync(TEST_REPO, { recursive: true });
     expect(startGateway()).toBe(true);
     expect(spawned).toHaveLength(1);
+    publishGatewayPidOnSpawnRef.value = true;
     healthStatuses.push(503, 503, 503, 200);
 
     const chunks: string[] = [];
@@ -733,6 +785,7 @@ describe("CLI fallback session id propagation", () => {
 
     apiRequestErrors.push("connect ECONNREFUSED 127.0.0.1:8765");
     healthStatuses.push(503, 200);
+    publishGatewayPidOnSpawnRef.value = true;
     const secondSendStart = requestEvents.length;
 
     const chunks: string[] = [];
@@ -773,6 +826,7 @@ describe("CLI fallback session id propagation", () => {
 
     apiRequestErrors.push("read ECONNRESET");
     healthStatuses.push(503, 200);
+    publishGatewayPidOnSpawnRef.value = true;
 
     const chunks: string[] = [];
     await expect(
@@ -809,6 +863,7 @@ describe("CLI fallback session id propagation", () => {
 
     apiRequestErrors.push("STATUS:401:Authentication failed");
     healthStatuses.push(503, 200);
+    publishGatewayPidOnSpawnRef.value = true;
     const startedSessions: string[] = [];
 
     await expect(
@@ -881,6 +936,7 @@ describe("CLI fallback session id propagation", () => {
 
     apiRequestErrors.push("STREAM_ERROR:read ECONNRESET");
     healthStatuses.push(503, 200);
+    publishGatewayPidOnSpawnRef.value = true;
     const secondSendStart = requestEvents.length;
 
     const chunks: string[] = [];
@@ -928,6 +984,7 @@ describe("CLI fallback session id propagation", () => {
       apiRequestErrors.push("TIMEOUT_ACCEPTED");
       healthStatuses.push(503, 503);
       healthSteadyStatusRef.value = 200;
+      publishGatewayPidOnSpawnRef.value = true;
       const secondSendStart = requestEvents.length;
 
       const chunks: string[] = [];

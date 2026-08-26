@@ -2,7 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChildProcess } from "node:child_process";
 
 import * as processTree from "./process-tree";
-import { terminateProcessTree } from "./process-tree";
+import {
+  retryCapturedProcessTermination,
+  terminateProcessTree,
+} from "./process-tree";
 
 interface FakeProcess {
   child: ChildProcess;
@@ -109,6 +112,91 @@ describe("terminateProcessTree", () => {
     } finally {
       platform.mockRestore();
       vi.useRealTimers();
+    }
+  });
+
+  it("fails closed before TERM when the caller cannot reverify root ownership", async () => {
+    const alive = new Set([100]);
+    const root = fakeChildProcess(100, alive);
+    const verifyRootOwnership = vi.fn(() => false);
+
+    const result = await terminateProcessTree(root.child, {
+      detachedProcessGroup: false,
+      forceAfterMs: 0,
+      verifyRootOwnership,
+      operations: {
+        descendantProcesses: () => [],
+        processIdentity: () => "root-start",
+        pidIsAlive: (pid) => alive.has(pid),
+      },
+    } as never);
+
+    expect(verifyRootOwnership).toHaveBeenCalledWith(100);
+    expect(root.kill).not.toHaveBeenCalled();
+    expect(result).toEqual({ forced: false, remainingPids: [100] });
+  });
+
+  it("fails closed before KILL when root ownership changes after TERM", async () => {
+    const alive = new Set([100]);
+    const root = fakeChildProcess(100, alive);
+    const verifyRootOwnership = vi
+      .fn<(pid: number) => boolean>()
+      .mockReturnValueOnce(true)
+      .mockReturnValueOnce(true)
+      .mockReturnValueOnce(true)
+      .mockReturnValueOnce(false);
+
+    const result = await terminateProcessTree(root.child, {
+      detachedProcessGroup: false,
+      forceAfterMs: 0,
+      forceSettleMs: 0,
+      verifyRootOwnership,
+      operations: {
+        descendantProcesses: () => [],
+        processIdentity: () => "root-start",
+        pidIsAlive: (pid) => alive.has(pid),
+      },
+    } as never);
+
+    expect(root.kill.mock.calls.map(([signal]) => signal)).toEqual(["SIGTERM"]);
+    expect(verifyRootOwnership).toHaveBeenCalledTimes(4);
+    expect(result).toEqual({ forced: false, remainingPids: [100] });
+  });
+
+  it("rechecks root ownership immediately before a fallback TERM", async () => {
+    const platform = vi
+      .spyOn(process, "platform", "get")
+      .mockReturnValue("win32");
+    const alive = new Set([100]);
+    const root = fakeChildProcess(100, alive);
+    const verifyRootOwnership = vi
+      .fn<(pid: number) => boolean>()
+      .mockReturnValueOnce(true)
+      .mockReturnValueOnce(true)
+      .mockReturnValue(false);
+    const gracefulWindowsTree = vi.fn(() => {
+      throw new Error("taskkill unavailable");
+    });
+
+    try {
+      const result = await terminateProcessTree(root.child, {
+        detachedProcessGroup: false,
+        forceAfterMs: 0,
+        verifyRootOwnership,
+        operations: {
+          descendantProcesses: () => [],
+          processIdentity: () => "root-start",
+          pidIsAlive: (pid) => alive.has(pid),
+          gracefulWindowsTree,
+        },
+      } as never);
+
+      expect(gracefulWindowsTree).toHaveBeenCalledOnce();
+      expect(root.kill).not.toHaveBeenCalled();
+      expect(verifyRootOwnership.mock.calls.length).toBeGreaterThanOrEqual(2);
+      expect(result.remainingPids).toEqual([100]);
+    } finally {
+      platform.mockRestore();
     }
   });
 
@@ -352,7 +440,10 @@ describe("terminateProcessTree", () => {
   });
 
   // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Exact process-tree shutdown]]
-  it("does not signal a descendant after its PID is reused", async () => {
+  it("does not signal a descendant after its PID is reused before TERM", async () => {
+    const platform = vi
+      .spyOn(process, "platform", "get")
+      .mockReturnValue("win32");
     const alive = new Set([100, 101]);
     const root = fakeChildProcess(100, alive);
     const signalPid = vi.fn();
@@ -362,21 +453,68 @@ describe("terminateProcessTree", () => {
       childIdentityChecks += 1;
       return childIdentityChecks === 1 ? "child-start" : "different-process";
     });
-
-    const result = await terminateProcessTree(root.child, {
-      detachedProcessGroup: false,
-      forceAfterMs: 0,
-      operations: {
-        descendantProcesses: () => [{ pid: 101, identity: "child-start" }],
-        pidIsAlive: (pid) => alive.has(pid),
-        processIdentity,
-        signalPid,
-      },
+    root.kill.mockImplementation((signal: NodeJS.Signals) => {
+      if (signal === "SIGTERM") alive.delete(100);
+      return true;
     });
 
-    expect(result.forced).toBe(true);
-    expect(signalPid).toHaveBeenCalledWith(101, "SIGTERM");
-    expect(signalPid).not.toHaveBeenCalledWith(101, "SIGKILL");
+    try {
+      const result = await terminateProcessTree(root.child, {
+        detachedProcessGroup: false,
+        forceAfterMs: 0,
+        operations: {
+          descendantProcesses: () => [{ pid: 101, identity: "child-start" }],
+          pidIsAlive: (pid) => alive.has(pid),
+          processIdentity,
+          signalPid,
+          gracefulWindowsTree: vi.fn(() => {
+            throw new Error("taskkill unavailable");
+          }),
+        },
+      });
+
+      expect(result.remainingPids).toEqual([101]);
+      expect(signalPid).not.toHaveBeenCalledWith(101, "SIGTERM");
+      expect(signalPid).not.toHaveBeenCalledWith(101, "SIGKILL");
+    } finally {
+      platform.mockRestore();
+    }
+  });
+
+  it("fails closed when a Windows descendant identity cannot be reverified before TERM", async () => {
+    const platform = vi
+      .spyOn(process, "platform", "get")
+      .mockReturnValue("win32");
+    const alive = new Set([100, 101]);
+    const root = fakeChildProcess(100, alive);
+    const signalPid = vi.fn();
+    const captureSnapshot = vi.fn().mockResolvedValue([
+      { pid: 100, parentPid: 1, identity: "windows:root-start" },
+      { pid: 101, parentPid: 100, identity: "windows:child-start" },
+    ]);
+    const gracefulWindowsTree = vi.fn(() => {
+      throw new Error("taskkill unavailable");
+    });
+
+    try {
+      const result = await terminateProcessTree(root.child, {
+        detachedProcessGroup: false,
+        forceAfterMs: 0,
+        forceSettleMs: 0,
+        operations: {
+          captureSnapshot,
+          pidIsAlive: (pid) => alive.has(pid),
+          signalPid,
+          gracefulWindowsTree,
+        } as never,
+      });
+
+      expect(signalPid).not.toHaveBeenCalledWith(101, "SIGTERM");
+      expect(signalPid).not.toHaveBeenCalledWith(101, "SIGKILL");
+      expect(result.remainingPids).toContain(101);
+    } finally {
+      platform.mockRestore();
+    }
   });
 
   // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Bounded force escalation]]
@@ -422,6 +560,148 @@ describe("terminateProcessTree", () => {
   });
 
   // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Exact process-tree shutdown]]
+  it("retries only the original Windows process identity after its root exits", async () => {
+    const platform = vi
+      .spyOn(process, "platform", "get")
+      .mockReturnValue("win32");
+    const alive = new Set([100, 101]);
+    const root = fakeChildProcess(100, alive);
+    const captureSnapshot = vi
+      .fn()
+      .mockResolvedValueOnce([
+        { pid: 100, parentPid: 1, identity: "windows:root-start" },
+        { pid: 101, parentPid: 100, identity: "windows:child-start" },
+      ])
+      .mockResolvedValueOnce([
+        { pid: 101, parentPid: 1, identity: "windows:child-start" },
+      ])
+      .mockResolvedValueOnce([
+        { pid: 101, parentPid: 1, identity: "windows:child-start" },
+      ]);
+    const gracefulWindowsTree = vi.fn(() => {
+      alive.delete(100);
+      Object.defineProperty(root.child, "exitCode", {
+        configurable: true,
+        value: 0,
+      });
+    });
+    const signalPid = vi.fn();
+
+    try {
+      const first = await terminateProcessTree(root.child, {
+        detachedProcessGroup: false,
+        forceAfterMs: 0,
+        forceSettleMs: 0,
+        operations: {
+          captureSnapshot,
+          gracefulWindowsTree,
+          forceWindowsTree: vi.fn(),
+          pidIsAlive: (pid) => alive.has(pid),
+          processIdentity: (pid) =>
+            pid === 100 ? "windows:root-start" : "windows:child-start",
+          signalPid,
+        } as never,
+      });
+      expect(first.remainingPids).toEqual([101]);
+      expect(first.retryOwnership).toBeDefined();
+      if (!first.retryOwnership) return;
+
+      captureSnapshot.mockReset();
+      captureSnapshot.mockResolvedValue([
+        { pid: 101, parentPid: 1, identity: "windows:reused-child" },
+      ]);
+      signalPid.mockClear();
+
+      await expect(
+        retryCapturedProcessTermination(first.retryOwnership, {
+          forceAfterMs: 0,
+          forceSettleMs: 0,
+          operations: {
+            captureSnapshot,
+            pidIsAlive: (pid) => alive.has(pid),
+            signalPid,
+          } as never,
+        }),
+      ).resolves.toMatchObject({ forced: false, remainingPids: [] });
+      expect(signalPid).not.toHaveBeenCalled();
+    } finally {
+      platform.mockRestore();
+    }
+  });
+
+  // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Exact process-tree shutdown]]
+  it("fails closed when a retry identity refresh contains an unusable row", async () => {
+    const platform = vi
+      .spyOn(process, "platform", "get")
+      .mockReturnValue("win32");
+    const alive = new Set([100, 101]);
+    const root = fakeChildProcess(100, alive);
+    const captureSnapshot = vi
+      .fn()
+      .mockResolvedValueOnce([
+        { pid: 100, parentPid: 1, identity: "windows:root-start" },
+        { pid: 101, parentPid: 100, identity: "windows:child-start" },
+      ])
+      .mockResolvedValueOnce([
+        { pid: 101, parentPid: 1, identity: "windows:child-start" },
+      ])
+      .mockResolvedValueOnce([
+        { pid: 101, parentPid: 1, identity: "windows:child-start" },
+      ]);
+    const gracefulWindowsTree = vi.fn(() => {
+      alive.delete(100);
+      Object.defineProperty(root.child, "exitCode", {
+        configurable: true,
+        value: 0,
+      });
+    });
+    const signalPid = vi.fn();
+
+    try {
+      const first = await terminateProcessTree(root.child, {
+        detachedProcessGroup: false,
+        forceAfterMs: 0,
+        forceSettleMs: 0,
+        operations: {
+          captureSnapshot,
+          gracefulWindowsTree,
+          forceWindowsTree: vi.fn(),
+          pidIsAlive: (pid) => alive.has(pid),
+          processIdentity: (pid) =>
+            pid === 100 ? "windows:root-start" : "windows:child-start",
+          signalPid,
+        } as never,
+      });
+      expect(first.retryOwnership).toBeDefined();
+      if (!first.retryOwnership) return;
+
+      captureSnapshot
+        .mockReset()
+        .mockResolvedValue([{ pid: 101, parentPid: 1, identity: "" }]);
+      signalPid.mockClear();
+
+      const retry = await retryCapturedProcessTermination(
+        first.retryOwnership,
+        {
+          forceAfterMs: 0,
+          forceSettleMs: 0,
+          operations: {
+            captureSnapshot,
+            pidIsAlive: (pid) => alive.has(pid),
+            signalPid,
+          } as never,
+        },
+      );
+
+      expect(retry.remainingPids).toEqual([101]);
+      expect(retry.retryOwnership).toBe(first.retryOwnership);
+      expect(signalPid).not.toHaveBeenCalled();
+    } finally {
+      platform.mockRestore();
+    }
+  });
+
+  // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Exact process-tree shutdown]]
   it("terminates a verified Windows listener when only its PID is available", async () => {
     const terminateProcessTreeByPid = (
       processTree as unknown as {
@@ -454,6 +734,101 @@ describe("terminateProcessTree", () => {
 
       expect(gracefulWindowsTree).toHaveBeenCalledWith(100, expect.any(Number));
       expect(result).toEqual({ forced: false, remainingPids: [] });
+    } finally {
+      platform.mockRestore();
+    }
+  });
+
+  // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Exact process-tree shutdown]]
+  it("terminates an exact POSIX listener when only its PID is available", async () => {
+    const platform = vi
+      .spyOn(process, "platform", "get")
+      .mockReturnValue("darwin");
+    const alive = new Set([process.pid]);
+    const signalPid = vi.fn((pid: number, signal: NodeJS.Signals) => {
+      if (pid === process.pid && signal === "SIGTERM") alive.delete(pid);
+    });
+    const processIdentity = vi.fn(() => "darwin:listener-start");
+
+    try {
+      const result = await processTree.terminateProcessTreeByPid(process.pid, {
+        detachedProcessGroup: false,
+        forceAfterMs: 0,
+        operations: {
+          pidIsAlive: (pid) => alive.has(pid),
+          processIdentity,
+          descendantProcesses: () => [],
+          signalPid,
+        } as never,
+      });
+
+      expect(signalPid).toHaveBeenCalledWith(process.pid, "SIGTERM");
+      expect(processIdentity).toHaveBeenCalledWith(process.pid);
+      expect(result).toEqual({ forced: false, remainingPids: [] });
+    } finally {
+      platform.mockRestore();
+    }
+  });
+
+  // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Exact process-tree shutdown]]
+  it("fails closed when a POSIX PID-only identity cannot be captured", async () => {
+    const platform = vi
+      .spyOn(process, "platform", "get")
+      .mockReturnValue("darwin");
+    const signalPid = vi.fn();
+
+    try {
+      const result = await processTree.terminateProcessTreeByPid(process.pid, {
+        detachedProcessGroup: false,
+        forceAfterMs: 0,
+        operations: {
+          pidIsAlive: () => true,
+          processIdentity: () => null,
+          descendantProcesses: () => [],
+          signalPid,
+        } as never,
+      });
+
+      expect(signalPid).not.toHaveBeenCalled();
+      expect(result).toEqual({
+        forced: false,
+        remainingPids: [process.pid],
+      });
+    } finally {
+      platform.mockRestore();
+    }
+  });
+
+  // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Bounded force escalation]]
+  it("does not force a POSIX PID-only process after identity reuse", async () => {
+    const platform = vi
+      .spyOn(process, "platform", "get")
+      .mockReturnValue("darwin");
+    const identities = vi
+      .fn<() => string | null>()
+      .mockReturnValueOnce("darwin:owned-process")
+      .mockReturnValueOnce("darwin:reused-process");
+    const signalPid = vi.fn();
+
+    try {
+      const result = await processTree.terminateProcessTreeByPid(process.pid, {
+        detachedProcessGroup: false,
+        forceAfterMs: 0,
+        forceSettleMs: 0,
+        operations: {
+          pidIsAlive: () => true,
+          processIdentity: identities,
+          descendantProcesses: () => [],
+          signalPid,
+        } as never,
+      });
+
+      expect(signalPid).toHaveBeenCalledWith(process.pid, "SIGTERM");
+      expect(signalPid).not.toHaveBeenCalledWith(process.pid, "SIGKILL");
+      expect(result).toEqual({
+        forced: false,
+        remainingPids: [process.pid],
+      });
     } finally {
       platform.mockRestore();
     }
@@ -882,6 +1257,8 @@ describe("terminateProcessTree", () => {
           forceWindowsTree,
           gracefulWindowsTree,
           pidIsAlive: (pid) => alive.has(pid),
+          processIdentity: (pid) =>
+            pid === 100 ? "windows:root-1" : "windows:child-1",
           signalPid,
         } as never,
       });
@@ -951,6 +1328,48 @@ describe("terminateProcessTree", () => {
       .mockResolvedValueOnce([
         { pid: 100, parentPid: 1, identity: "windows:owned-root" },
       ])
+      .mockImplementationOnce(() => {
+        alive.delete(100);
+        return Promise.resolve([]);
+      });
+    const forceWindowsTree = vi.fn();
+
+    try {
+      const result = await terminateProcessTree(root.child, {
+        detachedProcessGroup: false,
+        forceAfterMs: 0,
+        forceSettleMs: 0,
+        operations: {
+          captureSnapshot,
+          forceWindowsTree,
+          gracefulWindowsTree: vi.fn(),
+          // Model the brief stale Node liveness probe observed after taskkill.
+          pidIsAlive: (pid) => alive.has(pid),
+        } as never,
+      });
+
+      expect(captureSnapshot).toHaveBeenCalledTimes(3);
+      expect(result).toEqual({ forced: true, remainingPids: [] });
+    } finally {
+      platform.mockRestore();
+    }
+  });
+
+  // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Exact process-tree shutdown]]
+  it("does not treat an empty Windows snapshot as exit while the PID is live", async () => {
+    const platform = vi
+      .spyOn(process, "platform", "get")
+      .mockReturnValue("win32");
+    const alive = new Set([100]);
+    const root = fakeChildProcess(100, alive);
+    const captureSnapshot = vi
+      .fn()
+      .mockResolvedValueOnce([
+        { pid: 100, parentPid: 1, identity: "windows:owned-root" },
+      ])
+      .mockResolvedValueOnce([
+        { pid: 100, parentPid: 1, identity: "windows:owned-root" },
+      ])
       .mockResolvedValueOnce([]);
 
     try {
@@ -962,13 +1381,11 @@ describe("terminateProcessTree", () => {
           captureSnapshot,
           forceWindowsTree: vi.fn(),
           gracefulWindowsTree: vi.fn(),
-          // Model the brief stale Node liveness probe observed after taskkill.
           pidIsAlive: (pid) => alive.has(pid),
         } as never,
       });
 
-      expect(captureSnapshot).toHaveBeenCalledTimes(3);
-      expect(result).toEqual({ forced: true, remainingPids: [] });
+      expect(result).toMatchObject({ forced: true, remainingPids: [100] });
     } finally {
       platform.mockRestore();
     }
@@ -1122,6 +1539,34 @@ describe("terminateProcessTree", () => {
         pid: 456,
         parentPid: 123,
         identity: "windows:134146437120000000",
+      },
+    ]);
+  });
+
+  it("keeps the legacy Windows process reader on the canonical identity format", () => {
+    expect(processTree.parseWindowsProcessRecords(
+      JSON.stringify([
+        {
+          ProcessId: 456,
+          ParentProcessId: 123,
+          CreationFileTimeUtc: "134146437120000000",
+        },
+        {
+          ProcessId: 457,
+          ParentProcessId: 456,
+          CreationFileTimeUtc: "134146437120000001",
+        },
+      ]),
+    )).toEqual([
+      {
+        pid: 456,
+        parentPid: 123,
+        identity: "windows:134146437120000000",
+      },
+      {
+        pid: 457,
+        parentPid: 456,
+        identity: "windows:134146437120000001",
       },
     ]);
   });

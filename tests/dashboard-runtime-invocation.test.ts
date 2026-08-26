@@ -1,5 +1,6 @@
 // @vitest-environment node
 
+import { EventEmitter } from "node:events";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 
@@ -8,13 +9,18 @@ const {
   TEST_RUNTIME,
   httpRequestSpy,
   killProcessTreeSpy,
+  terminateProcessTreeSpy,
+  retryCapturedProcessTerminationSpy,
   spawnSpy,
   isGatewayHealthySpy,
   startGatewayWithRecoverySpy,
+  pidAliveRef,
   modelConfig,
   profileEnv,
   modelRows,
   providerSecrets,
+  activeProfileRef,
+  activeProfileNameSpy,
 } = vi.hoisted(() => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const path = require("path");
@@ -25,8 +31,18 @@ const {
   const home = path.join(os.tmpdir(), `dashboard-runtime-${Date.now()}`);
   const runtime = path.join(home, "runtime");
   const killProcessTreeSpy = vi.fn();
+  const terminateProcessTreeSpy = vi.fn(async () => ({
+    forced: false,
+    remainingPids: [],
+  }));
+  const retryCapturedProcessTerminationSpy = vi.fn(async () => ({
+    forced: false,
+    remainingPids: [],
+  }));
   const isGatewayHealthySpy = vi.fn(async () => true);
   const startGatewayWithRecoverySpy = vi.fn(async () => true);
+  const activeProfileRef = { value: undefined as string | undefined };
+  const activeProfileNameSpy = vi.fn(() => activeProfileRef.value);
 
   const spawnSpy = vi.fn(() => {
     const proc = new EventEmitter();
@@ -77,9 +93,12 @@ const {
     TEST_RUNTIME: runtime,
     httpRequestSpy,
     killProcessTreeSpy,
+    terminateProcessTreeSpy,
+    retryCapturedProcessTerminationSpy,
     spawnSpy,
     isGatewayHealthySpy,
     startGatewayWithRecoverySpy,
+    pidAliveRef: { value: true },
     modelConfig: {
       provider: "auto",
       model: "",
@@ -96,6 +115,8 @@ const {
       createdAt: number;
     }>,
     providerSecrets: {} as Record<string, string>,
+    activeProfileRef,
+    activeProfileNameSpy,
   };
 });
 
@@ -108,10 +129,8 @@ vi.mock("../src/main/process-tree", () => ({
   killProcessTree: killProcessTreeSpy,
   // dashboard.ts reaches hermes.ts for the shared readiness gate; hermes
   // references this export when wiring its default TUI client dependencies.
-  terminateProcessTree: vi.fn(async () => ({
-    forced: false,
-    remainingPids: [],
-  })),
+  terminateProcessTree: terminateProcessTreeSpy,
+  retryCapturedProcessTermination: retryCapturedProcessTerminationSpy,
 }));
 
 vi.mock("http", () => ({
@@ -198,23 +217,43 @@ vi.mock("../src/main/ssh-remote", () => ({
 }));
 
 vi.mock("../src/main/utils", () => ({
-  getActiveProfileNameSync: () => undefined,
+  getActiveProfileNameSync: activeProfileNameSpy,
   normalizeProfileName: (profile?: string) =>
     !profile || profile === "default" ? undefined : profile,
+  pidIsAlive: () => pidAliveRef.value,
   profileHome: () => TEST_HOME,
 }));
 
-import { startDashboard, stopAllDashboards } from "../src/main/dashboard";
+import {
+  getDashboardStatus,
+  startDashboard,
+  stopAllDashboards,
+  stopDashboard,
+} from "../src/main/dashboard";
 
 describe("Dashboard Runtime invocation", () => {
   beforeEach(() => {
     spawnSpy.mockClear();
     httpRequestSpy.mockClear();
     killProcessTreeSpy.mockClear();
+    terminateProcessTreeSpy.mockClear();
+    terminateProcessTreeSpy.mockResolvedValue({
+      forced: false,
+      remainingPids: [],
+    });
+    retryCapturedProcessTerminationSpy.mockClear();
+    retryCapturedProcessTerminationSpy.mockResolvedValue({
+      forced: false,
+      remainingPids: [],
+    });
     isGatewayHealthySpy.mockReset();
     isGatewayHealthySpy.mockResolvedValue(true);
     startGatewayWithRecoverySpy.mockReset();
     startGatewayWithRecoverySpy.mockResolvedValue(true);
+    pidAliveRef.value = true;
+    activeProfileRef.value = undefined;
+    activeProfileNameSpy.mockReset();
+    activeProfileNameSpy.mockImplementation(() => activeProfileRef.value);
     modelConfig.provider = "auto";
     modelConfig.model = "";
     modelConfig.baseUrl = "";
@@ -231,8 +270,8 @@ describe("Dashboard Runtime invocation", () => {
     );
   });
 
-  afterEach(() => {
-    stopAllDashboards();
+  afterEach(async () => {
+    await stopAllDashboards().catch(() => undefined);
     rmSync(TEST_HOME, { recursive: true, force: true });
   });
 
@@ -276,18 +315,180 @@ describe("Dashboard Runtime invocation", () => {
     expect(spawnSpy).not.toHaveBeenCalled();
   });
 
+  // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Cancelled startup cannot outlive Desktop]]
+  it("does not spawn a Dashboard after a pending Gateway recovery is stopped", async () => {
+    isGatewayHealthySpy.mockResolvedValue(false);
+    let releaseRecovery!: (value: boolean) => void;
+    const recovery = new Promise<boolean>((resolve) => {
+      releaseRecovery = resolve;
+    });
+    startGatewayWithRecoverySpy.mockReturnValueOnce(recovery);
+
+    const starting = startDashboard("work");
+    await vi.waitFor(() =>
+      expect(startGatewayWithRecoverySpy).toHaveBeenCalledOnce(),
+    );
+
+    const stopping = stopAllDashboards();
+    let settled = false;
+    void stopping.then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    releaseRecovery(true);
+    await expect(starting).resolves.toMatchObject({
+      supported: true,
+      running: false,
+    });
+    await stopping;
+    expect(spawnSpy).not.toHaveBeenCalled();
+  });
+
+  // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Pool-wide App shutdown]]
+  it("awaits an in-flight local Dashboard start before reporting shutdown", async () => {
+    let releaseHealthy!: (value: boolean) => void;
+    const healthy = new Promise<boolean>((resolve) => {
+      releaseHealthy = resolve;
+    });
+    isGatewayHealthySpy.mockReturnValueOnce(healthy);
+    startGatewayWithRecoverySpy.mockResolvedValue(true);
+
+    const starting = startDashboard("work");
+    await vi.waitFor(() => expect(isGatewayHealthySpy).toHaveBeenCalledOnce());
+
+    const stopping = stopAllDashboards();
+    let settled = false;
+    void stopping.then(() => {
+      settled = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(settled).toBe(false);
+
+    releaseHealthy(false);
+    await expect(starting).resolves.toMatchObject({
+      supported: true,
+      running: false,
+    });
+    await stopping;
+    expect(spawnSpy).not.toHaveBeenCalled();
+  });
+
   it("does not signal a host process while disposing the mocked Runtime", async () => {
     const processKillSpy = vi.spyOn(process, "kill").mockReturnValue(true);
     try {
       const result = await startDashboard("work");
 
       expect(result.running).toBe(true);
-      stopAllDashboards();
-      expect(killProcessTreeSpy).toHaveBeenCalledOnce();
+      await stopAllDashboards();
+      expect(terminateProcessTreeSpy).toHaveBeenCalledOnce();
       expect(processKillSpy).not.toHaveBeenCalled();
     } finally {
       processKillSpy.mockRestore();
     }
+  });
+
+  // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Awaited Electron quit barrier]]
+  it("returns an awaited shutdown for the local Dashboard process tree", async () => {
+    const result = await startDashboard("work");
+    expect(result.running).toBe(true);
+
+    let release!: () => void;
+    const termination = new Promise<{
+      forced: boolean;
+      remainingPids: number[];
+    }>((resolve) => {
+      release = resolve;
+    });
+    terminateProcessTreeSpy.mockReturnValueOnce(termination);
+
+    const stopping = stopAllDashboards();
+    expect(stopping).toBeInstanceOf(Promise);
+    if (!(stopping instanceof Promise)) return;
+
+    let settled = false;
+    void stopping.then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    release({ forced: false, remainingPids: [] });
+    await stopping;
+    expect(settled).toBe(true);
+  });
+
+  // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Cancelled startup cannot outlive Desktop]]
+  it("serializes a same-Profile restart behind an in-flight Dashboard stop", async () => {
+    await expect(startDashboard("work")).resolves.toMatchObject({
+      running: true,
+    });
+
+    let releaseTermination!: (value: {
+      forced: boolean;
+      remainingPids: number[];
+    }) => void;
+    const termination = new Promise<{
+      forced: boolean;
+      remainingPids: number[];
+    }>((resolve) => {
+      releaseTermination = resolve;
+    });
+    terminateProcessTreeSpy.mockReturnValueOnce(termination);
+
+    const stopping = stopDashboard("work");
+    await vi.waitFor(() =>
+      expect(terminateProcessTreeSpy).toHaveBeenCalledOnce(),
+    );
+
+    const restarting = startDashboard("work");
+    await Promise.resolve();
+    expect(spawnSpy).toHaveBeenCalledOnce();
+
+    releaseTermination({ forced: false, remainingPids: [] });
+    await stopping;
+    await expect(restarting).resolves.toMatchObject({
+      supported: true,
+      running: true,
+    });
+    expect(spawnSpy).toHaveBeenCalledTimes(2);
+  });
+
+  // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Pool-wide App shutdown]]
+  it("rechecks pool admission after waiting for a same-Profile stop", async () => {
+    await expect(startDashboard("work")).resolves.toMatchObject({
+      running: true,
+    });
+
+    let releaseTermination!: (value: {
+      forced: boolean;
+      remainingPids: number[];
+    }) => void;
+    const termination = new Promise<{
+      forced: boolean;
+      remainingPids: number[];
+    }>((resolve) => {
+      releaseTermination = resolve;
+    });
+    terminateProcessTreeSpy.mockReturnValueOnce(termination);
+
+    const profileStop = stopDashboard("work");
+    await vi.waitFor(() =>
+      expect(terminateProcessTreeSpy).toHaveBeenCalledOnce(),
+    );
+    const racingStart = startDashboard("work");
+    const poolStop = stopAllDashboards();
+
+    releaseTermination({ forced: false, remainingPids: [] });
+    await profileStop;
+    await poolStop;
+    await expect(racingStart).resolves.toMatchObject({
+      supported: true,
+      running: false,
+      error: expect.stringMatching(/pool is shutting down/i),
+    });
+    expect(spawnSpy).toHaveBeenCalledOnce();
   });
 
   it("bridges the active named custom-provider key into the Dashboard Runtime host slot", async () => {
@@ -314,6 +515,190 @@ describe("Dashboard Runtime invocation", () => {
           ANHEPRO_API_KEY: "named-provider-secret",
         }),
       }),
+    );
+  });
+
+  // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Pool-wide App shutdown]]
+  it("rejects a Dashboard start admitted during pool shutdown", async () => {
+    const initial = await startDashboard("work");
+    expect(initial.running).toBe(true);
+
+    let releaseTermination!: (value: {
+      forced: boolean;
+      remainingPids: number[];
+    }) => void;
+    const termination = new Promise<{
+      forced: boolean;
+      remainingPids: number[];
+    }>((resolve) => {
+      releaseTermination = resolve;
+    });
+    terminateProcessTreeSpy.mockReturnValueOnce(termination);
+
+    const stopping = stopAllDashboards();
+    await vi.waitFor(() =>
+      expect(terminateProcessTreeSpy).toHaveBeenCalledOnce(),
+    );
+
+    const lateStart = startDashboard("work");
+    await Promise.resolve();
+    expect(spawnSpy).toHaveBeenCalledOnce();
+
+    releaseTermination({ forced: false, remainingPids: [] });
+    await stopping;
+    await expect(lateStart).resolves.toMatchObject({
+      supported: true,
+      running: false,
+    });
+    expect(spawnSpy).toHaveBeenCalledOnce();
+  });
+
+  // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Pool-wide App shutdown]]
+  it("drains the exact default Dashboard after the active Profile changes", async () => {
+    await expect(startDashboard()).resolves.toMatchObject({ running: true });
+
+    activeProfileNameSpy.mockReset();
+    activeProfileNameSpy.mockReturnValueOnce("work").mockReturnValue(undefined);
+    await stopAllDashboards();
+
+    expect(activeProfileNameSpy).not.toHaveBeenCalled();
+    expect(terminateProcessTreeSpy).toHaveBeenCalledOnce();
+  });
+
+  // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Pool-wide App shutdown]]
+  it("attempts every Dashboard cleanup and retains only failed ownership for retry", async () => {
+    await expect(startDashboard("work")).resolves.toMatchObject({
+      running: true,
+    });
+    await expect(startDashboard("personal")).resolves.toMatchObject({
+      running: true,
+    });
+
+    terminateProcessTreeSpy
+      .mockResolvedValueOnce({ forced: false, remainingPids: [4242] })
+      .mockResolvedValueOnce({ forced: false, remainingPids: [] })
+      .mockResolvedValueOnce({ forced: false, remainingPids: [] });
+
+    await expect(stopAllDashboards()).rejects.toThrow(
+      /Aera Dashboard cleanup failed/i,
+    );
+    expect(terminateProcessTreeSpy).toHaveBeenCalledTimes(2);
+
+    await expect(stopAllDashboards()).resolves.toBeUndefined();
+    expect(terminateProcessTreeSpy).toHaveBeenCalledTimes(3);
+  });
+
+  // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Pool-wide App shutdown]]
+  it("retains ownership when failed Dashboard startup cleanup needs a retry", async () => {
+    let requestCount = 0;
+    httpRequestSpy.mockImplementation((...args: unknown[]) => {
+      const callback =
+        typeof args[1] === "function"
+          ? args[1]
+          : typeof args[2] === "function"
+            ? args[2]
+            : null;
+      const req = new EventEmitter();
+      Object.assign(req, {
+        destroy: vi.fn(),
+        setTimeout: vi.fn(),
+        end: () => {
+          requestCount += 1;
+          if (callback) {
+            const response = new EventEmitter();
+            Object.assign(response, { statusCode: 200, statusMessage: "OK" });
+            callback(response);
+            queueMicrotask(() => {
+              response.emit("data", Buffer.from("{}"));
+              response.emit("end");
+            });
+            return;
+          }
+          queueMicrotask(() => {
+            if (requestCount === 2) {
+              const response = new EventEmitter();
+              Object.assign(response, { statusCode: 503 });
+              req.emit("response", response);
+              response.emit("end");
+            } else {
+              req.emit("upgrade", {}, { destroy: vi.fn() });
+            }
+          });
+        },
+      });
+      return req;
+    });
+    terminateProcessTreeSpy
+      .mockResolvedValueOnce({ forced: false, remainingPids: [4242] })
+      .mockResolvedValueOnce({ forced: false, remainingPids: [] });
+
+    const result = await startDashboard("work");
+    expect(result).toMatchObject({ supported: true, running: false });
+    expect(await getDashboardStatus("work")).toMatchObject({
+      supported: true,
+      running: false,
+      error: expect.stringContaining("cleanup"),
+    });
+    expect(terminateProcessTreeSpy).toHaveBeenCalledOnce();
+
+    await expect(stopDashboard("work")).resolves.toBe(true);
+    expect(terminateProcessTreeSpy).toHaveBeenCalledTimes(2);
+  });
+
+  // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Pool-wide App shutdown]]
+  it("retains startup ownership when the root exits but descendants remain", async () => {
+    httpRequestSpy.mockImplementation((...args: unknown[]) => {
+      const callback =
+        typeof args[1] === "function"
+          ? args[1]
+          : typeof args[2] === "function"
+            ? args[2]
+            : null;
+      const req = new EventEmitter();
+      Object.assign(req, {
+        destroy: vi.fn(),
+        setTimeout: vi.fn(),
+        end: () => {
+          if (callback) {
+            const response = new EventEmitter();
+            Object.assign(response, { statusCode: 200, statusMessage: "OK" });
+            callback(response);
+            queueMicrotask(() => {
+              response.emit("data", Buffer.from("{}"));
+              response.emit("end");
+            });
+            return;
+          }
+          queueMicrotask(() => req.emit("error", new Error("ws failed")));
+        },
+      });
+      return req;
+    });
+    const retryOwnership = {};
+    terminateProcessTreeSpy.mockImplementationOnce(
+      async (proc: EventEmitter) => {
+        pidAliveRef.value = false;
+        proc.emit("exit", 1, null);
+        return {
+          forced: false,
+          remainingPids: [4343],
+          retryOwnership,
+        };
+      },
+    );
+
+    await expect(startDashboard("work")).resolves.toMatchObject({
+      supported: true,
+      running: false,
+      error: expect.stringContaining("cleanup"),
+    });
+    expect(terminateProcessTreeSpy).toHaveBeenCalledOnce();
+
+    await expect(stopDashboard("work")).resolves.toBe(true);
+    expect(terminateProcessTreeSpy).toHaveBeenCalledOnce();
+    expect(retryCapturedProcessTerminationSpy).toHaveBeenCalledWith(
+      retryOwnership,
+      expect.objectContaining({ forceAfterMs: 3_000 }),
     );
   });
 });

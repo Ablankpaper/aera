@@ -104,7 +104,9 @@ Recovery both reconciles the port and spawns, so one call site never spawns ahea
 
 ### Cancelled startup cannot outlive Desktop
 
-Every asynchronous TUI start belongs to one generation. Stop invalidates that generation before releasing ownership, so a pending port or readiness continuation cannot publish a late process.
+Every asynchronous TUI or local Dashboard start belongs to one generation. Stop invalidates that generation before releasing ownership, so no old continuation can publish a late process.
+
+The guarded boundaries include port selection, Gateway recovery, HTTP readiness, and WebSocket setup. Each stop waits a bounded three seconds for the startup continuation, then performs one exact late-child pass; a third-party readiness promise that never settles therefore cannot make Electron cleanup unbounded.
 
 ### Gateway readiness evidence
 
@@ -122,13 +124,17 @@ Local `gateway-status` answers from an authenticated readiness probe instead of 
 
 ### Pool-wide App shutdown
 
-Pool shutdown closes admission before it awaits every mapped or in-flight TUI client. App quit closes admission permanently; ordinary Runtime cleanup reopens it only after a clean drain.
+Pool shutdown closes TUI and local Dashboard admission before it awaits every mapped, pending-start, or already-stopping client.
 
-Failed clients retain their exact child ownership for a later bounded retry. Concurrent cleanup requests serialize, wait for all clients with `allSettled`, and propagate any remaining process or termination error instead of reporting a clean drain.
+App quit closes both admissions permanently; ordinary Runtime cleanup reopens them only after a clean drain. A same-Profile Dashboard restart outside pool shutdown serializes behind its exact stop, while a start racing pool shutdown returns `running:false` and cannot create a replacement after the cleanup barrier reports success.
+
+Failed clients retain their exact child ownership and a non-secret failure marker for a later bounded retry. This includes a process spawned by a Dashboard start whose readiness or WebSocket probe failed but whose tree could not be fully terminated. Concurrent cleanup requests serialize, attempt all exact clients with `allSettled`, and propagate any remaining process or termination error instead of reporting a clean drain.
 
 ### Awaited Electron quit barrier
 
 The first quit request pauses Electron and retries only after bounded Runtime cleanup succeeds. Cleanup awaits the TUI pool and every Aera-owned ordinary Gateway process tree.
+
+Dashboard, TUI, ordinary Gateway, SSH transport, and database cleanup are observed concurrently after Runtime activity drains. One branch rejecting cannot prevent the remaining branches from running; the barrier aggregates their results and fails closed when any exact ownership remains.
 
 Repeated in-flight requests reuse one cleanup; unresolved ownership or termination keeps Electron open and a later explicit quit may retry.
 

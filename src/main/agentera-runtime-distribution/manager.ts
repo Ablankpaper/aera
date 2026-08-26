@@ -279,6 +279,7 @@ export function createRuntimeDistributionManager(
   let offer: RuntimeUpdateOffer | null = null;
   let downloadController: AbortController | null = null;
   let operation: Promise<void> = Promise.resolve();
+  let initialization: Promise<RuntimeDistributionPublicState> | null = null;
 
   const publish = (
     next: RuntimeDistributionPublicState,
@@ -309,19 +310,33 @@ export function createRuntimeDistributionManager(
     }
   };
 
-  const initialize = async (): Promise<RuntimeDistributionPublicState> => {
-    if (state !== null) return cloneState(state);
-    if (options.isExternalRuntime?.()) {
-      return publish(createExternalState());
-    }
-    const journal = await store.recover();
-    observedCurrent = journal.current;
-    return publish(
-      createBaseState(
-        journal,
-        await readCandidateFailureCode(options.paths, journal.candidate),
-      ),
-    );
+  const initialize = (): Promise<RuntimeDistributionPublicState> => {
+    if (state !== null) return Promise.resolve(cloneState(state));
+    if (initialization !== null) return initialization;
+
+    const pending = (async (): Promise<RuntimeDistributionPublicState> => {
+      if (options.isExternalRuntime?.()) {
+        return publish(createExternalState());
+      }
+      const journal = await store.recover();
+      observedCurrent = journal.current;
+      return publish(
+        createBaseState(
+          journal,
+          await readCandidateFailureCode(options.paths, journal.candidate),
+        ),
+      );
+    })();
+    initialization = pending;
+    void pending
+      .finally(() => {
+        if (initialization === pending) initialization = null;
+      })
+      .catch(() => {
+        // The caller receives the initialization failure; the next state read
+        // may retry after the failed attempt has released its shared slot.
+      });
+    return pending;
   };
 
   const getState = async (): Promise<RuntimeDistributionPublicState> => {

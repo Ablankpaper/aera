@@ -102,6 +102,55 @@ describe("GatewayProcessOwnershipLedger", () => {
     expect(stored).not.toMatch(/credential|token|secret|api.?key/i);
   });
 
+  it("migrates a legacy v1 record to schema v3 but keeps missing evidence ambiguous", () => {
+    writeFileSync(
+      join(root, "gateway-process-ownership.json"),
+      JSON.stringify({
+        version: 1,
+        entries: [
+          {
+            launchId: "10000000-0000-4000-8000-000000000001",
+            desktopInstanceId: "10000000-0000-4000-8000-000000000002",
+            desktopPid: 100,
+            profileId: "research",
+            preLaunchPid: null,
+            spawnedPid: 201,
+            createdAt: NOW.toISOString(),
+          },
+        ],
+      }),
+      "utf8",
+    );
+
+    const restarted = ledger(999);
+    const stored = JSON.parse(
+      readFileSync(join(root, "gateway-process-ownership.json"), "utf8"),
+    );
+
+    expect(stored.version).toBe(3);
+    expect(stored.entries[0]).toEqual(
+      expect.objectContaining({
+        spawnedPid: 201,
+        spawnedIdentity: null,
+        spawnedImage: null,
+        listenerPid: null,
+        listenerIdentity: null,
+        listenerImage: null,
+      }),
+    );
+    expect(
+      restarted.reconcileColdStart({
+        readCurrentPid: () => null,
+        isAlive: () => false,
+        readEvidence: () => null,
+      }),
+    ).toEqual({
+      ownedProfiles: [],
+      ambiguousProfiles: ["research"],
+    });
+    expect(restarted.get("research")).not.toBeNull();
+  });
+
   it("records the spawned PID and lists every current-process profile", () => {
     const current = ledger();
     const defaultIntent = current.beginLaunch({
@@ -130,6 +179,134 @@ describe("GatewayProcessOwnershipLedger", () => {
     ]);
   });
 
+  it("persists the exact process identity and executable image", () => {
+    const current = ledger();
+    const intent = current.beginLaunch({
+      profileId: "research",
+      preLaunchPid: null,
+    });
+
+    const recorded = current.markSpawned({
+      profileId: "research",
+      launchId: intent.launchId,
+      spawnedPid: 201,
+      spawnedIdentity: "posix:Mon Aug 26 16:00:00 2026",
+      spawnedImage: "python3.11",
+    });
+
+    expect(recorded).toMatchObject({
+      spawnedPid: 201,
+      spawnedIdentity: "posix:Mon Aug 26 16:00:00 2026",
+      spawnedImage: "python3.11",
+    });
+    expect(
+      new GatewayProcessOwnershipLedger({
+        userDataPath: root,
+        desktopPid: 101,
+      }).get("research"),
+    ).toEqual(recorded);
+    expect(
+      JSON.parse(
+        readFileSync(join(root, "gateway-process-ownership.json"), "utf8"),
+      ).entries[0],
+    ).toMatchObject({
+      spawnedIdentity: "posix:Mon Aug 26 16:00:00 2026",
+      spawnedImage: "python3.11",
+    });
+  });
+
+  it("fails closed during cold recovery when listener evidence is missing or changed", () => {
+    const previous = ledger();
+    const intent = previous.beginLaunch({
+      profileId: "research",
+      preLaunchPid: null,
+    });
+    previous.markSpawned({
+      profileId: "research",
+      launchId: intent.launchId,
+      spawnedPid: 201,
+      spawnedIdentity: "windows:created-201",
+      spawnedImage: "python.exe",
+    });
+
+    const restarted = new GatewayProcessOwnershipLedger({
+      userDataPath: root,
+      desktopPid: 999,
+    });
+    expect(
+      restarted.reconcileColdStart({
+        readCurrentPid: () => 201,
+        isAlive: () => true,
+        readEvidence: () => ({
+          identity: "windows:reused-201",
+          image: "python.exe",
+        }),
+      }),
+    ).toEqual({ ownedProfiles: [], ambiguousProfiles: ["research"] });
+
+    expect(
+      restarted.reconcileColdStart({
+        readCurrentPid: () => 201,
+        isAlive: () => true,
+        readEvidence: () => ({
+          identity: "windows:created-201",
+          image: "node.exe",
+        }),
+      }),
+    ).toEqual({ ownedProfiles: [], ambiguousProfiles: ["research"] });
+
+    expect(
+      restarted.reconcileColdStart({
+        readCurrentPid: () => 201,
+        isAlive: () => true,
+        readEvidence: () => ({
+          identity: "windows:created-201",
+          image: "python.exe",
+        }),
+      }),
+    ).toEqual({ ownedProfiles: ["research"], ambiguousProfiles: [] });
+  });
+
+  it("recovers an adopted listener without requiring evidence from its exited wrapper", () => {
+    const previous = ledger();
+    const intent = previous.beginLaunch({
+      profileId: "research",
+      preLaunchPid: null,
+    });
+    previous.markSpawned({
+      profileId: "research",
+      launchId: intent.launchId,
+      spawnedPid: 201,
+      spawnedIdentity: null,
+      spawnedImage: null,
+    });
+    previous.adoptSpawnedPid({
+      profileId: "research",
+      launchId: intent.launchId,
+      previousSpawnedPid: 201,
+      spawnedPid: 202,
+      spawnedIdentity: "windows:listener-created",
+      spawnedImage: "python.exe",
+    });
+
+    const restarted = new GatewayProcessOwnershipLedger({
+      userDataPath: root,
+      desktopPid: 999,
+    });
+
+    expect(
+      restarted.reconcileColdStart({
+        readCurrentPid: () => 202,
+        isAlive: (candidate) => candidate === 202,
+        readEvidence: () => ({
+          identity: "windows:listener-created",
+          image: "python.exe",
+        }),
+      }),
+    ).toEqual({ ownedProfiles: ["research"], ambiguousProfiles: [] });
+    expect(restarted.get("research")?.listenerPid).toBe(202);
+  });
+
   it("atomically transfers wrapper ownership to its daemonized listener", () => {
     const current = ledger();
     const intent = current.beginLaunch({
@@ -140,6 +317,8 @@ describe("GatewayProcessOwnershipLedger", () => {
       profileId: "research",
       launchId: intent.launchId,
       spawnedPid: 201,
+      spawnedIdentity: "wrapper-start",
+      spawnedImage: "python3",
     });
     const adoptSpawnedPid = (
       current as unknown as {
@@ -159,10 +338,129 @@ describe("GatewayProcessOwnershipLedger", () => {
       launchId: intent.launchId,
       previousSpawnedPid: 201,
       spawnedPid: 202,
+      previousSpawnedIdentity: "wrapper-start",
+      previousSpawnedImage: "python3",
+      spawnedIdentity: "listener-start",
+      spawnedImage: "python3",
     });
 
-    expect(adopted.spawnedPid).toBe(202);
-    expect(current.get("research")?.spawnedPid).toBe(202);
+    expect(adopted.spawnedPid).toBe(201);
+    expect(adopted.spawnedIdentity).toBe("wrapper-start");
+    expect(adopted.spawnedImage).toBe("python3");
+    expect(adopted.listenerPid).toBe(202);
+    expect(adopted.listenerIdentity).toBe("listener-start");
+    expect(adopted.listenerImage).toBe("python3");
+    expect(current.get("research")?.listenerPid).toBe(202);
+  });
+
+  it("starts a durable restart intent without losing the prior listener proof", () => {
+    const current = ledger();
+    const launch = current.beginLaunch({
+      profileId: "research",
+      preLaunchPid: null,
+    });
+    current.markSpawned({
+      profileId: "research",
+      launchId: launch.launchId,
+      spawnedPid: 201,
+      spawnedIdentity: "wrapper-old",
+      spawnedImage: "python3",
+    });
+    current.adoptSpawnedPid({
+      profileId: "research",
+      launchId: launch.launchId,
+      previousSpawnedPid: 201,
+      previousSpawnedIdentity: "wrapper-old",
+      previousSpawnedImage: "python3",
+      spawnedPid: 202,
+      spawnedIdentity: "listener-old",
+      spawnedImage: "python3",
+    });
+
+    const restart = current.beginRestart({
+      profileId: "research",
+      preLaunchPid: 202,
+    });
+    current.markSpawned({
+      profileId: "research",
+      launchId: restart.record.launchId,
+      spawnedPid: 203,
+      spawnedIdentity: "wrapper-new",
+      spawnedImage: "python3",
+    });
+    restart.record = current.get("research")!;
+
+    expect(restart.previous.listenerPid).toBe(202);
+    expect(restart.record.launchId).not.toBe(launch.launchId);
+    expect(restart.record.spawnedPid).toBe(203);
+    expect(restart.record.listenerPid).toBe(202);
+    expect(current.get("research")).toEqual(restart.record);
+
+    current.restoreRestart(restart.record.launchId, restart.previous);
+    expect(current.get("research")).toEqual(restart.previous);
+  });
+
+  it("keeps a cross-PID legacy record ambiguous until listener evidence is adopted", () => {
+    const current = ledger();
+    const intent = current.beginLaunch({
+      profileId: "research",
+      preLaunchPid: null,
+    });
+    current.markSpawned({
+      profileId: "research",
+      launchId: intent.launchId,
+      spawnedPid: 201,
+      spawnedIdentity: "wrapper-start",
+      spawnedImage: "python3",
+    });
+
+    const restarted = new GatewayProcessOwnershipLedger({
+      userDataPath: root,
+      desktopPid: 999,
+    });
+    const recovery = restarted.reconcileColdStart({
+      readCurrentPid: () => 202,
+      isAlive: () => true,
+      readEvidence: () => ({
+        identity: "listener-start",
+        image: "python3",
+      }),
+    });
+    expect(recovery).toEqual({
+      ownedProfiles: [],
+      ambiguousProfiles: ["research"],
+    });
+  });
+
+  it("keeps ownership ambiguous when the stale pre-launch pid hides a live wrapper", () => {
+    const previous = ledger();
+    const intent = previous.beginLaunch({
+      profileId: "research",
+      preLaunchPid: 200,
+    });
+    previous.markSpawned({
+      profileId: "research",
+      launchId: intent.launchId,
+      spawnedPid: 201,
+      spawnedIdentity: "windows:wrapper-created",
+      spawnedImage: "python.exe",
+    });
+
+    const restarted = new GatewayProcessOwnershipLedger({
+      userDataPath: root,
+      desktopPid: 999,
+    });
+    const recovery = restarted.reconcileColdStart({
+      readCurrentPid: () => 200,
+      isAlive: (candidate) => candidate === 200 || candidate === 201,
+      readEvidence: () => null,
+    });
+
+    expect(recovery).toEqual({
+      ownedProfiles: [],
+      ambiguousProfiles: ["research"],
+    });
+    expect(restarted.get("research")).not.toBeNull();
   });
 
   it("clears a failed spawn but rejects immutable launch replay drift", () => {
@@ -321,6 +619,43 @@ describe("GatewayProcessOwnershipLedger", () => {
     ).toEqual(intent);
   });
 
+  it("preserves a legacy pending record when v3 migration cannot fsync", () => {
+    const legacy = {
+      version: 1,
+      entries: [
+        {
+          launchId: "10000000-0000-4000-8000-000000000001",
+          desktopInstanceId: "10000000-0000-4000-8000-000000000002",
+          desktopPid: 100,
+          profileId: "research",
+          preLaunchPid: null,
+          spawnedPid: 201,
+          createdAt: NOW.toISOString(),
+        },
+      ],
+    };
+    const legacyBytes = JSON.stringify(legacy);
+    const pendingPath = join(root, "gateway-process-ownership.pending.json");
+    writeFileSync(pendingPath, legacyBytes, "utf8");
+    fsFailureRef.failNextFileFsync = true;
+
+    const restarted = ledger(999);
+
+    expect(restarted.get("research")).toMatchObject({
+      profileId: "research",
+      spawnedPid: 201,
+      spawnedIdentity: null,
+      spawnedImage: null,
+    });
+    expect(restarted.getLoadIssue()).toBe("ownership_persistence_failed");
+    // Migration must use a new fsynced pending file and an atomic promotion;
+    // an interrupted rewrite may never destroy the only legacy evidence.
+    expect(
+      readFileSync(join(root, "gateway-process-ownership.json"), "utf8"),
+    ).toBe(legacyBytes);
+    expect(existsSync(pendingPath)).toBe(false);
+  });
+
   it("rejects a pending file that becomes invalid after ledger startup", () => {
     const current = ledger();
     const intent = current.beginLaunch({
@@ -401,6 +736,8 @@ describe("GatewayProcessOwnershipLedger", () => {
         profileId,
         launchId: intent.launchId,
         spawnedPid,
+        spawnedIdentity: `identity-${spawnedPid}`,
+        spawnedImage: "python3",
       });
     }
     const currentPid = new Map<string, number | null>([
@@ -418,14 +755,18 @@ describe("GatewayProcessOwnershipLedger", () => {
     const recovery = restarted.reconcileColdStart({
       readCurrentPid: (profileId) => currentPid.get(profileId) ?? null,
       isAlive: (pid) => pid !== 304,
+      readEvidence: (pid) => ({
+        identity: `identity-${pid}`,
+        image: "python3",
+      }),
     });
 
     expect(recovery).toEqual({
       ownedProfiles: ["owned"],
-      ambiguousProfiles: ["ambiguous", "missing_alive"],
+      ambiguousProfiles: ["ambiguous", "missing_alive", "unchanged"],
     });
     expect(restarted.get("owned")).not.toBeNull();
-    expect(restarted.get("unchanged")).toBeNull();
+    expect(restarted.get("unchanged")).not.toBeNull();
     expect(restarted.get("dead")).toBeNull();
     expect(restarted.get("ambiguous")).not.toBeNull();
     expect(restarted.get("missing_alive")).not.toBeNull();
