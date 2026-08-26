@@ -7,7 +7,10 @@ import {
   parseRuntimeManifest,
   type RuntimeManifest,
 } from "./agentera-runtime-distribution/manifest";
-import { validateRuntimeZipArchive } from "./agentera-runtime-distribution/archive-validation";
+import {
+  validateRuntimeZipArchive,
+  type RuntimeArchiveValidationDiagnostic,
+} from "./agentera-runtime-distribution/archive-validation";
 
 const HELPER_MARKER = "AGENTERA_RUNTIME_ARCHIVE_VALIDATION_HELPER";
 const DIAGNOSTIC_OUTPUT = "AGENTERA_RUNTIME_INVENTORY_DIAGNOSTIC_OUTPUT";
@@ -32,10 +35,10 @@ function helperDiagnostic(
   event:
     | "archive-helper-main-start"
     | "archive-helper-request-complete"
-    | "zip-validation-start"
-    | "zip-validation-complete"
     | "archive-helper-result-written"
-    | "archive-helper-failed",
+    | "archive-helper-failed"
+    | RuntimeArchiveValidationDiagnostic,
+  fields: Readonly<Record<string, number | string | boolean | null>> = {},
 ): void {
   const outputPath = process.env[DIAGNOSTIC_OUTPUT]?.trim();
   if (!outputPath || !isAbsolute(outputPath)) return;
@@ -44,7 +47,7 @@ function helperDiagnostic(
       outputPath,
       `${JSON.stringify({
         schemaVersion: 1,
-        event,
+        ...(typeof event === "string" ? { event, ...fields } : event),
         timestampMs: Date.now(),
         pid: process.pid,
       })}\n`,

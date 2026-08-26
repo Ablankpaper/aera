@@ -23,7 +23,7 @@ buildTest(
 
     expect(builtHelper).not.toContain("better-sqlite3");
     expect(builtHelper).not.toContain("@electron-internal/extract-zip");
-    expect(builtHelper).toContain("fromRandomAccessReaderPromise");
+    expect(builtHelper).toContain("fromBufferPromise");
     expect(builtHelper).toContain("AGENTERA_RUNTIME_ARCHIVE_VALIDATION_HELPER");
   },
 );

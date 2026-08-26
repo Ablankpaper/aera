@@ -1,11 +1,7 @@
+import { constants as bufferConstants } from "node:buffer";
 import { createReadStream } from "node:fs";
 import { open } from "node:fs/promises";
-import {
-  fromRandomAccessReaderPromise,
-  RandomAccessReader,
-  type Entry as ZipEntry,
-  type ZipFile,
-} from "yauzl";
+import { fromBufferPromise, type Entry as ZipEntry, type ZipFile } from "yauzl";
 
 import {
   type RuntimeInventoryKind,
@@ -48,9 +44,30 @@ export interface RuntimeArchiveFileSystem {
 
 export type RuntimeArchiveFileSystemLoader = () => Promise<unknown>;
 
+export type RuntimeArchiveValidationDiagnosticEvent =
+  | "zip-validation-start"
+  | "zip-validation-complete"
+  | "zip-validation-failed";
+
+export interface RuntimeArchiveValidationDiagnostic {
+  event: RuntimeArchiveValidationDiagnosticEvent;
+  durationMs?: number;
+  timeoutMs?: number;
+  archiveBytes?: number;
+  entryCount?: number;
+  extractedBytes?: number;
+}
+
 export type RuntimeArchiveValidationDiagnosticObserver = (
-  event: "zip-validation-start" | "zip-validation-complete",
+  diagnostic: RuntimeArchiveValidationDiagnostic,
 ) => void;
+
+/**
+ * The packaged Windows parent bounds the helper with the same deadline that
+ * is reported in its path-free diagnostic stream. The signed archive size,
+ * rather than an arbitrary process default, bounds the validation buffer.
+ */
+export const WINDOWS_ARCHIVE_VALIDATION_TIMEOUT_MS = 8 * 60 * 1000;
 
 const NODE_RUNTIME_ARCHIVE_FILE_SYSTEM: RuntimeArchiveFileSystem = {
   open,
@@ -96,55 +113,6 @@ export async function resolveRuntimeArchiveFileSystem(
   return {
     open: promiseRecord.open.bind(promises) as RuntimeArchiveFileSystem["open"],
   };
-}
-
-class RuntimeZipRandomAccessReader extends RandomAccessReader {
-  private closed = false;
-
-  constructor(private readonly handle: RuntimeArchiveFileHandle) {
-    super();
-  }
-
-  override _readStreamForRange(
-    start: number,
-    end: number,
-  ): ReturnType<typeof createReadStream> {
-    return this.handle.createReadStream({
-      start,
-      end: end - 1,
-      autoClose: false,
-    });
-  }
-
-  override read(
-    buffer: Buffer,
-    offset: number,
-    length: number,
-    position: number,
-    callback: (error: Error | null, bytesRead?: number) => void,
-  ): void {
-    void this.handle
-      .read(buffer, offset, length, position)
-      .then(({ bytesRead }) => callback(null, bytesRead))
-      .catch((error: unknown) =>
-        callback(error instanceof Error ? error : new Error("ZIP read failed")),
-      );
-  }
-
-  override close(callback: (error: Error | null) => void): void {
-    if (this.closed) {
-      setImmediate(callback, null);
-      return;
-    }
-    this.closed = true;
-    void this.handle.close().then(
-      () => callback(null),
-      (error: unknown) =>
-        callback(
-          error instanceof Error ? error : new Error("ZIP close failed"),
-        ),
-    );
-  }
 }
 
 interface ArchiveInventoryEntry {
@@ -248,9 +216,18 @@ async function* zipEntries(
     next?.();
     next = null;
   };
+  // `fromBuffer` deliberately disables yauzl's autoClose behavior. Its
+  // metadata lifecycle therefore ends with `end`, not `close`; handling both
+  // keeps the iterator bounded for buffer-backed and file-backed readers.
+  const onEnd = (): void => {
+    closed = true;
+    next?.();
+    next = null;
+  };
   zipfile.on("entry", onEntry);
   zipfile.on("error", onError);
   zipfile.on("close", onClose);
+  zipfile.on("end", onEnd);
   try {
     zipfile.readEntry();
     while (pending.length > 0 || (!closed && failure === null)) {
@@ -272,29 +249,65 @@ async function* zipEntries(
     zipfile.off("entry", onEntry);
     zipfile.off("error", onError);
     zipfile.off("close", onClose);
+    zipfile.off("end", onEnd);
   }
 }
 
-async function openRuntimeZip(
+async function readRuntimeZipBuffer(
   archivePath: string,
+  manifest: RuntimeManifest,
   fileSystem: RuntimeArchiveFileSystem,
-): Promise<ZipFile> {
+): Promise<Buffer> {
   const handle = await fileSystem.open(archivePath, "r");
-  const reader = new RuntimeZipRandomAccessReader(handle);
   try {
-    const metadata = await handle.stat();
-    if (!metadata.isFile()) {
+    const before = await handle.stat();
+    if (!before.isFile()) {
       throw new RuntimeExtractionError("Runtime ZIP archive must be a file");
     }
-    return await fromRandomAccessReaderPromise(reader, metadata.size, {
-      lazyEntries: true,
-      decodeStrings: true,
-      validateEntrySizes: true,
-      strictFileNames: true,
-    });
-  } catch (error) {
+    const archiveSize = manifest.archive_size;
+    if (
+      !Number.isSafeInteger(archiveSize) ||
+      archiveSize <= 0 ||
+      archiveSize > bufferConstants.MAX_LENGTH
+    ) {
+      throw new RuntimeExtractionError(
+        "Runtime archive size is outside the supported validation range",
+      );
+    }
+    if (before.size !== archiveSize) {
+      throw new RuntimeExtractionError(
+        "Runtime archive size differs from the signed manifest",
+      );
+    }
+    // A bounded sequence of positional reads replaces yauzl's per-entry
+    // random reads. Node may legally return fewer bytes than requested even
+    // for a regular file, so fill the signed-size buffer instead of treating
+    // the first partial read as evidence that the archive changed.
+    const buffer = Buffer.allocUnsafe(archiveSize);
+    let position = 0;
+    while (position < archiveSize) {
+      const { bytesRead } = await handle.read(
+        buffer,
+        position,
+        archiveSize - position,
+        position,
+      );
+      if (bytesRead <= 0) {
+        throw new RuntimeExtractionError(
+          "Runtime archive size changed during validation",
+        );
+      }
+      position += bytesRead;
+    }
+    const after = await handle.stat();
+    if (!after.isFile() || after.size !== archiveSize) {
+      throw new RuntimeExtractionError(
+        "Runtime archive size changed during validation",
+      );
+    }
+    return buffer;
+  } finally {
     await handle.close().catch(() => undefined);
-    throw error;
   }
 }
 
@@ -353,6 +366,7 @@ class ArchiveInventoryValidator {
   private readonly comparableSeen = new Set<string>();
   private rootSeen = false;
   private extractedBytes = 0;
+  private entryCount = 0;
 
   constructor(
     private readonly manifest: RuntimeManifest,
@@ -363,6 +377,7 @@ class ArchiveInventoryValidator {
   }
 
   addRoot(kind: RuntimeInventoryKind, mode: number): void {
+    this.entryCount += 1;
     if (this.rootSeen) {
       throw new RuntimeExtractionError(
         "Runtime archive contains a duplicate root",
@@ -377,6 +392,7 @@ class ArchiveInventoryValidator {
   }
 
   add(entry: ArchiveInventoryEntry): void {
+    this.entryCount += 1;
     const comparable = normalizedComparablePath(
       entry.path,
       this.manifest.platform === "windows",
@@ -454,6 +470,13 @@ class ArchiveInventoryValidator {
       );
     }
   }
+
+  get counts(): { entryCount: number; extractedBytes: number } {
+    return {
+      entryCount: this.entryCount,
+      extractedBytes: this.extractedBytes,
+    };
+  }
 }
 
 export async function validateRuntimeZipArchive(
@@ -464,13 +487,33 @@ export async function validateRuntimeZipArchive(
   fileSystem?: RuntimeArchiveFileSystem,
   onDiagnostic?: RuntimeArchiveValidationDiagnosticObserver,
 ): Promise<void> {
-  onDiagnostic?.("zip-validation-start");
+  const startedAt = Date.now();
+  const emit = (diagnostic: RuntimeArchiveValidationDiagnostic): void => {
+    try {
+      onDiagnostic?.(diagnostic);
+    } catch {
+      // Diagnostics are observational and must never change validation.
+    }
+  };
+  emit({
+    event: "zip-validation-start",
+    archiveBytes: manifest.archive_size,
+    timeoutMs: WINDOWS_ARCHIVE_VALIDATION_TIMEOUT_MS,
+  });
   const validator = new ArchiveInventoryValidator(manifest, maxExtractedBytes);
-  const zipfile = await openRuntimeZip(
-    archivePath,
-    fileSystem ?? (await resolveRuntimeArchiveFileSystem()),
-  );
+  let zipfile: ZipFile | undefined;
   try {
+    const archive = await readRuntimeZipBuffer(
+      archivePath,
+      manifest,
+      fileSystem ?? (await resolveRuntimeArchiveFileSystem()),
+    );
+    zipfile = await fromBufferPromise(archive, {
+      lazyEntries: true,
+      decodeStrings: true,
+      validateEntrySizes: true,
+      strictFileNames: true,
+    });
     for await (const entry of zipEntries(zipfile, signal)) {
       const metadata = zipEntryMetadata(entry);
       if ("root" in metadata) validator.addRoot(metadata.kind, metadata.mode);
@@ -487,8 +530,23 @@ export async function validateRuntimeZipArchive(
       } else validator.add(metadata);
     }
     validator.finish();
+    const counts = validator.counts;
+    emit({
+      event: "zip-validation-complete",
+      durationMs: Math.max(0, Date.now() - startedAt),
+      timeoutMs: WINDOWS_ARCHIVE_VALIDATION_TIMEOUT_MS,
+      archiveBytes: archive.length,
+      ...counts,
+    });
+  } catch (error) {
+    emit({
+      event: "zip-validation-failed",
+      durationMs: Math.max(0, Date.now() - startedAt),
+      timeoutMs: WINDOWS_ARCHIVE_VALIDATION_TIMEOUT_MS,
+      ...validator.counts,
+    });
+    throw error;
   } finally {
-    zipfile.close();
+    zipfile?.close();
   }
-  onDiagnostic?.("zip-validation-complete");
 }

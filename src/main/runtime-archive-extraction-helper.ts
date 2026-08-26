@@ -20,7 +20,10 @@ interface RuntimeArchiveExtractionHelperRequest {
   hostPlatform: "win32";
 }
 
-function helperDiagnostic(event: string): void {
+function helperDiagnostic(
+  event: string,
+  fields: Readonly<Record<string, number | string | boolean | null>> = {},
+): void {
   const outputPath = process.env[DIAGNOSTIC_OUTPUT]?.trim();
   if (!outputPath || !isAbsolute(outputPath)) return;
   try {
@@ -31,6 +34,7 @@ function helperDiagnostic(event: string): void {
         event,
         timestampMs: Date.now(),
         pid: process.pid,
+        ...fields,
       })}\n`,
       { encoding: "utf8", mode: 0o600 },
     );
@@ -122,8 +126,11 @@ async function main(): Promise<void> {
     throw new Error("invalid extraction destination");
   }
   const extract = await loadExtractor();
+  const startedAt = Date.now();
   await extract(request.archivePath, { dir: request.destination });
-  helperDiagnostic("archive-extraction-helper-result-written");
+  helperDiagnostic("archive-extraction-helper-result-written", {
+    durationMs: Math.max(0, Date.now() - startedAt),
+  });
   process.stdout.write('{"schemaVersion":1,"ok":true}\n');
 }
 

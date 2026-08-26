@@ -1,4 +1,6 @@
-import { readFile, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { expect, it, vi } from "vitest";
 
@@ -191,4 +193,43 @@ it("cancels the helper and removes its request when the caller aborts", async ()
   await expect(pending).rejects.toMatchObject({ name: "AbortError" });
   expect(helperSignal?.aborted).toBe(true);
   await expect(stat(requestPath)).rejects.toMatchObject({ code: "ENOENT" });
+});
+
+it("records bounded extraction timing evidence", async () => {
+  const root = await mkdtemp(join(tmpdir(), "aera-extraction-diagnostic-"));
+  const output = join(root, "events.jsonl");
+  try {
+    await extractRuntimeArchiveWithHelper(
+      {
+        archivePath: "C:\\runtime\\seed.zip",
+        destination: "C:\\runtime\\staging",
+        hostPlatform: "win32",
+      },
+      {
+        executablePath: "Aera.exe",
+        helperPath: "helper.js",
+        timeoutMs: 20,
+        sourceEnvironment: {
+          AGENTERA_RUNTIME_INVENTORY_DIAGNOSTIC_OUTPUT: output,
+        },
+        execute: async () => ({
+          stdout: '{"schemaVersion":1,"ok":true}\n',
+          stderr: "",
+        }),
+      },
+    );
+    const events = (await readFile(output, "utf8"))
+      .trim()
+      .split(/\r?\n/u)
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        event: "archive-extraction-helper-process-complete",
+        durationMs: expect.any(Number),
+        timeoutMs: 20,
+      }),
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

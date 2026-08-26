@@ -73,6 +73,7 @@ function helperTimeoutError(): RuntimeExtractionError {
 function runtimeInventoryProcessDiagnostic(
   sourceEnvironment: NodeJS.ProcessEnv,
   event: string,
+  fields: Readonly<Record<string, number | string | boolean | null>> = {},
 ): void {
   const outputPath = sourceEnvironment[HELPER_DIAGNOSTIC_OUTPUT]?.trim();
   if (!outputPath || !isAbsolute(outputPath)) return;
@@ -84,6 +85,7 @@ function runtimeInventoryProcessDiagnostic(
         event,
         timestampMs: Date.now(),
         pid: process.pid,
+        ...fields,
       })}\n`,
       { encoding: "utf8", mode: 0o600 },
     );
@@ -239,6 +241,7 @@ export async function verifyRuntimeInventoryWithHelper(
     let executionPromise:
       | Promise<RuntimeInventoryHelperExecutionResult>
       | undefined;
+    let executionStartedAt = 0;
     let rejectExternalAbort: ((reason: Error) => void) | null = null;
     const externalAbortPromise = options.signal
       ? new Promise<never>((_, reject) => {
@@ -255,7 +258,9 @@ export async function verifyRuntimeInventoryWithHelper(
       runtimeInventoryProcessDiagnostic(
         sourceEnvironment,
         "inventory-helper-spawn-start",
+        { timeoutMs },
       );
+      executionStartedAt = Date.now();
       executionPromise = execute(
         options.executablePath ?? process.execPath,
         [options.helperPath ?? defaultHelperPath(), requestPath],
@@ -284,11 +289,21 @@ export async function verifyRuntimeInventoryWithHelper(
       runtimeInventoryProcessDiagnostic(
         sourceEnvironment,
         "inventory-helper-process-complete",
+        {
+          durationMs: Math.max(0, Date.now() - executionStartedAt),
+          timeoutMs,
+        },
       );
       const result = parseHelperResult(execution.stdout);
       runtimeInventoryProcessDiagnostic(
         sourceEnvironment,
         "inventory-helper-result-parsed",
+        {
+          durationMs: Math.max(0, Date.now() - executionStartedAt),
+          timeoutMs,
+          fileCount: result.fileCount,
+          extractedBytes: result.extractedBytes,
+        },
       );
       return result;
     } catch (error) {
@@ -296,16 +311,37 @@ export async function verifyRuntimeInventoryWithHelper(
         runtimeInventoryProcessDiagnostic(
           sourceEnvironment,
           "inventory-helper-timeout",
+          {
+            durationMs: Math.max(
+              0,
+              Date.now() - (executionStartedAt || Date.now()),
+            ),
+            timeoutMs,
+          },
         );
       } else if (externallyAborted) {
         runtimeInventoryProcessDiagnostic(
           sourceEnvironment,
           "inventory-helper-cancelled",
+          {
+            durationMs: Math.max(
+              0,
+              Date.now() - (executionStartedAt || Date.now()),
+            ),
+            timeoutMs,
+          },
         );
       } else {
         runtimeInventoryProcessDiagnostic(
           sourceEnvironment,
           "inventory-helper-process-failed",
+          {
+            durationMs: Math.max(
+              0,
+              Date.now() - (executionStartedAt || Date.now()),
+            ),
+            timeoutMs,
+          },
         );
       }
       if (timedOut) throw helperTimeoutError();

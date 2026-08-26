@@ -19,6 +19,11 @@ const HELPER_ENVIRONMENT_KEYS = [
   HELPER_DIAGNOSTIC_OUTPUT,
 ] as const;
 
+// Windows Defender and first-run filesystem work can delay metadata parsing,
+// but the packaged parent must still have a finite, independently observable
+// deadline for this helper.
+export const WINDOWS_ARCHIVE_VALIDATION_TIMEOUT_MS = 8 * 60 * 1000;
+
 export interface RuntimeArchiveValidationHelperRequest {
   schemaVersion?: 1;
   archivePath: string;
@@ -31,6 +36,7 @@ interface RuntimeArchiveValidationHelperExecutionOptions {
   env: NodeJS.ProcessEnv;
   windowsHide: boolean;
   signal?: AbortSignal;
+  timeoutMs?: number;
 }
 
 interface RuntimeArchiveValidationHelperExecutionResult {
@@ -49,6 +55,7 @@ interface RuntimeArchiveValidationHelperOptions {
   helperPath?: string;
   sourceEnvironment?: NodeJS.ProcessEnv;
   signal?: AbortSignal;
+  timeoutMs?: number;
   execute?: RuntimeArchiveValidationHelperExecutor;
 }
 
@@ -58,9 +65,16 @@ function helperAbortError(): Error {
   return error;
 }
 
+function helperTimeoutError(): RuntimeExtractionError {
+  return new RuntimeExtractionError(
+    "isolated Runtime archive validation timed out",
+  );
+}
+
 function runtimeArchiveProcessDiagnostic(
   sourceEnvironment: NodeJS.ProcessEnv,
   event: string,
+  fields: Readonly<Record<string, number | string | boolean | null>> = {},
 ): void {
   const outputPath = sourceEnvironment[HELPER_DIAGNOSTIC_OUTPUT]?.trim();
   if (!outputPath || !isAbsolute(outputPath)) return;
@@ -72,6 +86,7 @@ function runtimeArchiveProcessDiagnostic(
         event,
         timestampMs: Date.now(),
         pid: process.pid,
+        ...fields,
       })}\n`,
       { encoding: "utf8", mode: 0o600 },
     );
@@ -94,6 +109,8 @@ function executeRuntimeArchiveValidationHelper(
         env: options.env,
         windowsHide: options.windowsHide,
         signal: options.signal,
+        timeout: options.timeoutMs,
+        killSignal: "SIGTERM",
         maxBuffer: 64 * 1024,
       },
       (error, stdout, stderr) => {
@@ -188,6 +205,12 @@ export async function verifyRuntimeArchiveWithHelper(
   options: RuntimeArchiveValidationHelperOptions = {},
 ): Promise<void> {
   if (options.signal?.aborted) throw helperAbortError();
+  const timeoutMs = options.timeoutMs ?? WINDOWS_ARCHIVE_VALIDATION_TIMEOUT_MS;
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1) {
+    throw new RuntimeExtractionError(
+      "isolated Runtime archive validation timeout is invalid",
+    );
+  }
   const temporaryDirectory = await mkdtemp(
     join(tmpdir(), "aera-runtime-archive-validation-"),
   );
@@ -201,13 +224,36 @@ export async function verifyRuntimeArchiveWithHelper(
       { flag: "wx", mode: 0o600 },
     );
     const execute = options.execute ?? executeRuntimeArchiveValidationHelper;
-    let execution: RuntimeArchiveValidationHelperExecutionResult;
+    const controller = new AbortController();
+    let timedOut = false;
+    let externallyAborted = false;
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+    let executionPromise:
+      | Promise<RuntimeArchiveValidationHelperExecutionResult>
+      | undefined;
+    let execution: RuntimeArchiveValidationHelperExecutionResult | undefined;
+    let executionStartedAt = 0;
+    let rejectExternalAbort: ((reason: Error) => void) | null = null;
+    const externalAbortPromise = options.signal
+      ? new Promise<never>((_, reject) => {
+          rejectExternalAbort = reject;
+        })
+      : null;
+    const onAbort = (): void => {
+      externallyAborted = true;
+      controller.abort();
+      rejectExternalAbort?.(helperAbortError());
+    };
+    options.signal?.addEventListener("abort", onAbort, { once: true });
     try {
+      if (options.signal?.aborted) onAbort();
       runtimeArchiveProcessDiagnostic(
         sourceEnvironment,
         "archive-helper-spawn-start",
+        { timeoutMs },
       );
-      execution = await execute(
+      executionStartedAt = Date.now();
+      executionPromise = execute(
         options.executablePath ?? process.execPath,
         [options.helperPath ?? defaultHelperPath(), requestPath],
         {
@@ -215,28 +261,89 @@ export async function verifyRuntimeArchiveWithHelper(
             sourceEnvironment,
           ),
           windowsHide: true,
-          signal: options.signal,
+          signal: controller.signal,
+          timeoutMs,
         },
       );
+      void executionPromise.catch(() => undefined);
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timeoutHandle = setTimeout(() => {
+          timedOut = true;
+          controller.abort();
+          reject(helperTimeoutError());
+        }, timeoutMs);
+      });
+      const races: Promise<
+        RuntimeArchiveValidationHelperExecutionResult | never
+      >[] = [executionPromise, timeoutPromise];
+      if (externalAbortPromise) races.push(externalAbortPromise);
+      execution = await Promise.race(races);
+      if (options.signal?.aborted) throw helperAbortError();
       runtimeArchiveProcessDiagnostic(
         sourceEnvironment,
         "archive-helper-process-complete",
+        {
+          durationMs: Math.max(0, Date.now() - executionStartedAt),
+          timeoutMs,
+        },
+      );
+      if (!execution) {
+        throw new RuntimeExtractionError(
+          "isolated Runtime archive validation returned no result",
+        );
+      }
+      parseHelperResult(execution.stdout);
+      runtimeArchiveProcessDiagnostic(
+        sourceEnvironment,
+        "archive-helper-result-parsed",
+        {
+          durationMs: Math.max(0, Date.now() - executionStartedAt),
+          timeoutMs,
+        },
       );
     } catch (error) {
+      const fields = {
+        durationMs: Math.max(
+          0,
+          Date.now() - (executionStartedAt || Date.now()),
+        ),
+        timeoutMs,
+      };
+      if (timedOut) {
+        runtimeArchiveProcessDiagnostic(
+          sourceEnvironment,
+          "archive-helper-timeout",
+          fields,
+        );
+      } else if (externallyAborted) {
+        runtimeArchiveProcessDiagnostic(
+          sourceEnvironment,
+          "archive-helper-cancelled",
+          fields,
+        );
+      }
       runtimeArchiveProcessDiagnostic(
         sourceEnvironment,
         "archive-helper-process-failed",
+        fields,
       );
+      if (timedOut) throw helperTimeoutError();
+      if (externallyAborted) throw helperAbortError();
       if (error instanceof Error && error.name === "AbortError") throw error;
+      if (error instanceof RuntimeExtractionError) throw error;
       throw new RuntimeExtractionError(
         "isolated Runtime archive validation failed",
       );
+    } finally {
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+      options.signal?.removeEventListener("abort", onAbort);
+      if (timedOut || externallyAborted) {
+        await Promise.race([
+          executionPromise?.catch(() => undefined) ?? Promise.resolve(),
+          new Promise<void>((resolve) => setTimeout(resolve, 1_000)),
+        ]);
+      }
     }
-    parseHelperResult(execution.stdout);
-    runtimeArchiveProcessDiagnostic(
-      sourceEnvironment,
-      "archive-helper-result-parsed",
-    );
   } finally {
     await rm(temporaryDirectory, { recursive: true, force: true }).catch(
       () => undefined,
