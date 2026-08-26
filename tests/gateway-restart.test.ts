@@ -15,6 +15,7 @@ const {
   restartScript,
   hermesCliArgsSpy,
   prepareGatewayManagedConfigurationSpy,
+  processEvidenceRef,
 } = vi.hoisted(() => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const path = require("path");
@@ -24,7 +25,12 @@ const {
   const script =
     "const fs=require('fs'),path=require('path');" +
     "fs.writeFileSync(path.join(process.env.HERMES_HOME,'restart-env.json')," +
-    "JSON.stringify({api:process.env.API_SERVER_ENABLED,key:process.env.TEST_PROFILE_KEY}))";
+    "JSON.stringify({api:process.env.API_SERVER_ENABLED,key:process.env.TEST_PROFILE_KEY}));" +
+    "const profile=process.env.TEST_PROFILE_KEY||'default';" +
+    "const home=profile==='default'?process.env.HERMES_HOME:path.join(process.env.HERMES_HOME,'profiles',profile);" +
+    "fs.mkdirSync(home,{recursive:true});" +
+    "fs.writeFileSync(path.join(home,'gateway.pid'),String(process.pid));" +
+    "setInterval(()=>{},1000)";
 
   return {
     TEST_HOME: path.join(os.tmpdir(), `hermes-gateway-restart-${Date.now()}`),
@@ -33,9 +39,9 @@ const {
     healthStatuses: [] as number[],
     aliveGatewayPids: new Set<number>(),
     realGatewayPids: new Set<number>(),
-    pidAliveProbeRef: {
-      onProbe: null as ((pid: number) => void) | null,
-    },
+  pidAliveProbeRef: {
+    onProbe: null as ((pid: number) => void) | null,
+  },
     ensureLocalApiServerKeySpy: vi.fn(() => ({
       generated: false,
       key: "unit-test-internal-token",
@@ -50,6 +56,12 @@ const {
       key: "unit-test-internal-token",
       port: 8642,
     })),
+    // Gateway lifecycle tests use real child processes for a few scenarios,
+    // but must not consult the host `ps` table. Keep process identity/image
+    // evidence deterministic and overridable per PID instead.
+    processEvidenceRef: {
+      byPid: new Map<number, { identity: string; image: string }>(),
+    },
   };
 });
 
@@ -103,13 +115,22 @@ vi.mock("../src/main/utils", () => ({
   stripAnsi: (s: string) => s,
   pidIsAliveAs: (pid: number) => {
     pidAliveProbeRef.onProbe?.(pid);
-    if (!aliveGatewayPids.has(pid)) return false;
-    if (!realGatewayPids.has(pid)) return true;
+    if (aliveGatewayPids.has(pid)) {
+      if (!realGatewayPids.has(pid)) return true;
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        aliveGatewayPids.delete(pid);
+        return false;
+      }
+    }
+    // Real child processes used by the fixture are still deterministic: the
+    // identity/image seam above, rather than host `ps`, supplies evidence.
     try {
       process.kill(pid, 0);
       return true;
     } catch {
-      aliveGatewayPids.delete(pid);
       return false;
     }
   },
@@ -137,6 +158,28 @@ vi.mock("../src/main/process-options", () => ({
   HIDDEN_SUBPROCESS_OPTIONS: {},
 }));
 
+vi.mock("../src/main/process-identity", () => ({
+  normalizeProcessImage: (value: unknown) =>
+    typeof value === "string" && value.trim()
+      ? value.trim().replaceAll("\\", "/").split("/").at(-1)!.toLowerCase()
+      : null,
+  // The mocked Runtime invocation launches Node snippets as a stand-in for
+  // Python. Treat that deterministic fixture image as the Runtime image;
+  // image-mismatch cases can override `processEvidenceRef.byPid` below.
+  processImageMatchesExecutable: (observed: string, _expected: string) =>
+    /^python(?:w|\d(?:\.\d+)?)?$/i.test(observed),
+  processEvidenceMatches: (
+    actual: { identity: string; image: string } | null,
+    expected: { identity: string; image: string } | null,
+  ) =>
+    actual?.identity === expected?.identity && actual?.image === expected?.image,
+  readProcessIdentityEvidence: (pid: number) =>
+    processEvidenceRef.byPid.get(pid) ?? {
+      identity: `test-created-${pid}`,
+      image: "python3",
+    },
+}));
+
 vi.mock("http", () => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { EventEmitter } = require("events");
@@ -157,10 +200,20 @@ vi.mock("http", () => {
       req.destroy = vi.fn();
       req.end = (): void => {
         queueMicrotask(() => {
+          const response = new EventEmitter() as InstanceType<
+            typeof EventEmitter
+          > & {
+            statusCode: number;
+            resume: () => void;
+          };
+          response.statusCode = healthStatuses.shift() ?? 503;
+          response.resume = vi.fn();
           callback({
-            statusCode: healthStatuses.shift() ?? 503,
-            resume: vi.fn(),
-          });
+            statusCode: response.statusCode,
+            resume: response.resume,
+            on: response.on.bind(response),
+          } as unknown as { statusCode: number; resume: () => void });
+          queueMicrotask(() => response.emit("end"));
         });
       };
       return req;
@@ -252,6 +305,7 @@ describe("restartGatewayViaCli", () => {
     healthRequests.length = 0;
     aliveGatewayPids.clear();
     realGatewayPids.clear();
+    processEvidenceRef.byPid.clear();
     pidAliveProbeRef.onProbe = null;
     ensureLocalApiServerKeySpy.mockClear();
     prepareGatewayManagedConfigurationSpy.mockClear();
@@ -318,7 +372,7 @@ describe("restartGatewayViaCli", () => {
     });
     hermesCliArgsSpy.mockImplementation(() => [
       "-e",
-      `require("fs").writeFileSync(${JSON.stringify(launchProofFile)},JSON.stringify({key:process.env.API_SERVER_KEY,port:process.env.API_SERVER_PORT}));setInterval(()=>{},1000)`,
+      `const fs=require("fs"),path=require("path");fs.writeFileSync(${JSON.stringify(launchProofFile)},JSON.stringify({key:process.env.API_SERVER_KEY,port:process.env.API_SERVER_PORT}));fs.mkdirSync(path.join(process.env.HERMES_HOME,"profiles","work"),{recursive:true});fs.writeFileSync(path.join(process.env.HERMES_HOME,"profiles","work","gateway.pid"),String(process.pid));setInterval(()=>{},1000)`,
     ]);
     healthStatuses.push(200);
 
@@ -340,7 +394,7 @@ describe("restartGatewayViaCli", () => {
     });
     hermesCliArgsSpy.mockImplementation(() => [
       "-e",
-      `require("fs").writeFileSync(${JSON.stringify(restartProofFile)},JSON.stringify({key:process.env.API_SERVER_KEY,port:process.env.API_SERVER_PORT}))`,
+      `const fs=require("fs"),path=require("path");fs.writeFileSync(${JSON.stringify(restartProofFile)},JSON.stringify({key:process.env.API_SERVER_KEY,port:process.env.API_SERVER_PORT}));fs.mkdirSync(path.join(process.env.HERMES_HOME,"profiles","work"),{recursive:true});fs.writeFileSync(path.join(process.env.HERMES_HOME,"profiles","work","gateway.pid"),String(process.pid));setInterval(()=>{},1000)`,
     ]);
     healthStatuses.push(503, 200);
 
@@ -573,9 +627,14 @@ describe("restartGatewayViaCli", () => {
     realGatewayPids.add(spawnedPid);
 
     configureGatewayProcessOwnership(TEST_HOME);
+    // Windows terminates a Node child synchronously for SIGTERM, so cold
+    // recovery can finish and clear the durable record in the same call. POSIX
+    // keeps the target alive until the bounded termination timer observes the
+    // exit; both outcomes are safe, but only the latter remains ambiguous at
+    // this API boundary.
     expect(recoverAeraOwnedGatewaysFromPreviousRun()).toEqual({
       reapedProfiles: [],
-      ambiguousProfiles: ["work"],
+      ambiguousProfiles: process.platform === "win32" ? [] : ["work"],
     });
 
     expect(await waitForProcessExit(spawnedPid, 3000)).toBe(true);
@@ -874,9 +933,8 @@ describe("restartGatewayViaCli", () => {
       teardownStart,
       start.indexOf("function notifyConnectionConfigChanged"),
     );
-    expect(teardown).toContain(
-      "const gatewayShutdown = stopAeraOwnedGateways()",
-    );
+    expect(teardown).toContain("await settleRuntimeCleanup([");
+    expect(teardown).toContain("return stopAeraOwnedGateways().then(");
     expect(teardown).not.toContain("stopGateway(undefined, true)");
   });
 
@@ -908,14 +966,33 @@ describe("restartGatewayViaCli", () => {
   it("treats a long-running restart process as success once health is ready", async () => {
     const pidFile = join(TEST_HOME, "long-running-restart.pid");
     const longRunningRestartScript =
-      "const fs=require('fs');" +
+      "const fs=require('fs'),path=require('path');" +
       `fs.writeFileSync(${JSON.stringify(pidFile)},String(process.pid));` +
+      `fs.mkdirSync(path.join(process.env.HERMES_HOME,'profiles','work'),{recursive:true});` +
+      `fs.writeFileSync(path.join(process.env.HERMES_HOME,'profiles','work','gateway.pid'),String(process.pid));` +
       "setInterval(() => {}, 1000);";
 
     hermesCliArgsSpy.mockImplementation(() => ["-e", longRunningRestartScript]);
     healthStatuses.push(200, 503, 200);
 
     await expect(restartGatewayViaCli("work", 50, 1)).resolves.toBe(true);
+
+    const ownership = JSON.parse(
+      readFileSync(
+        join(TEST_HOME, "gateway-process-ownership.json"),
+        "utf8",
+      ),
+    ).entries;
+    expect(ownership).toEqual([
+      expect.objectContaining({
+        profileId: "work",
+        spawnedIdentity: expect.any(String),
+        spawnedImage: "python3",
+        listenerPid: expect.any(Number),
+        listenerIdentity: expect.any(String),
+        listenerImage: "python3",
+      }),
+    ]);
 
     expect(isGatewayRunning("work")).toBe(true);
     expect(hermesCliArgsSpy).toHaveBeenCalledWith([
@@ -934,8 +1011,10 @@ describe("restartGatewayViaCli", () => {
   it("times out and stops a long-running restart process when health stays down", async () => {
     const pidFile = join(TEST_HOME, "unhealthy-restart.pid");
     const unhealthyRestartScript =
-      "const fs=require('fs');" +
+      "const fs=require('fs'),path=require('path');" +
       `fs.writeFileSync(${JSON.stringify(pidFile)},String(process.pid));` +
+      `fs.mkdirSync(path.join(process.env.HERMES_HOME,'profiles','work'),{recursive:true});` +
+      `fs.writeFileSync(path.join(process.env.HERMES_HOME,'profiles','work','gateway.pid'),String(process.pid));` +
       "setInterval(() => {}, 1000);";
 
     hermesCliArgsSpy.mockImplementation(() => ["-e", unhealthyRestartScript]);
@@ -990,7 +1069,7 @@ describe("restartGatewayViaCli", () => {
   });
 
   it("uses the native restart path only after the old gateway stops", async () => {
-    hermesCliArgsSpy.mockImplementation(() => ["-e", "process.exit(0)"]);
+    hermesCliArgsSpy.mockImplementation(() => ["-e", restartScript]);
     healthStatuses.push(503, 200);
 
     await expect(restartGateway("work", 50, 1)).resolves.toBe(true);
@@ -1031,7 +1110,7 @@ describe("restartGatewayViaCli", () => {
       .mockImplementationOnce(() => {
         throw new Error("first failed");
       })
-      .mockImplementation(() => ["-e", "process.exit(0)"]);
+      .mockImplementation(() => ["-e", restartScript]);
     healthStatuses.push(503, 200, 503, 503, 503, 200, 200, 200);
 
     const first = restartGatewayViaCli("work", queuedRestartHealthTimeoutMs, 1);
@@ -1059,7 +1138,7 @@ describe("restartGatewayViaCli", () => {
       .mockImplementationOnce(() => {
         throw new Error("first failed");
       })
-      .mockImplementation(() => ["-e", "process.exit(0)"]);
+      .mockImplementation(() => ["-e", restartScript]);
     healthStatuses.push(503, 200, 503, 503, 503, 200, 200, 200);
 
     const first = restartGatewayViaCli("work", 5, 1);
@@ -1151,11 +1230,14 @@ describe("restartGatewayViaCli", () => {
   });
 
   it("falls back to a native restart when a normal start does not become healthy", async () => {
-    hermesCliArgsSpy.mockImplementation(() => ["-e", "process.exit(0)"]);
+    hermesCliArgsSpy.mockImplementation(() => ["-e", restartScript]);
     healthStatuses.push(503, 503, 200);
 
     await expect(
-      startGatewayWithRecovery("work", 5, 50, 15000, 250),
+      // This assertion covers the recovery transition, not host scheduler
+      // latency. Give the real child-process fixture enough time to publish
+      // gateway.pid when the full Vitest suite is running concurrently.
+      startGatewayWithRecovery("work", 5, 50, 15000, 2000),
     ).resolves.toBe(true);
 
     expect(hermesCliArgsSpy).toHaveBeenNthCalledWith(1, [

@@ -190,20 +190,82 @@ describe("TuiGatewayClient lifecycle", () => {
 
   // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Cancelled startup cannot outlive Desktop]]
   it("does not spawn after stop invalidates pending port selection", async () => {
-    const port = deferred<number>();
-    const { dependencies, spawnBackend } = lifecycleDependencies({
-      pickDashboardPort: vi.fn(() => port.promise),
+    vi.useFakeTimers();
+    try {
+      const port = deferred<number>();
+      const { dependencies, spawnBackend } = lifecycleDependencies({
+        pickDashboardPort: vi.fn(() => port.promise),
+      });
+      const client = new TuiGatewayClient("work", {}, dependencies);
+
+      const started = client.start();
+      void started.catch(() => undefined);
+      const stopped = client.stop();
+      await vi.advanceTimersByTimeAsync(3_000);
+      await stopped;
+
+      // Release the continuation only after stop's bounded late-child pass.
+      // The generation guard before spawn must still reject it.
+      port.resolve(9120);
+      await expect(started).rejects.toThrow("stopped");
+      await Promise.resolve();
+      expect(spawnBackend).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Pool-wide App shutdown]]
+  it("does not finish pool shutdown while a spawned client is still starting", async () => {
+    const readiness = deferred<void>();
+    const { dependencies, spawnBackend, child } = lifecycleDependencies({
+      waitForDashboardReady: vi.fn(() => readiness.promise),
+      terminateProcessTree: vi.fn(async () => ({
+        forced: false,
+        remainingPids: [],
+      })),
     });
-    const client = new TuiGatewayClient("work", {}, dependencies);
-
+    const client = getTuiGatewayClient("starting", dependencies);
     const started = client.start();
-    const stopped = client.stop();
-    port.resolve(9120);
+    void started.catch(() => undefined);
+    await vi.waitFor(() => expect(spawnBackend).toHaveBeenCalledOnce());
 
-    await expect(started).rejects.toThrow("stopped");
-    await stopped;
-    await Promise.resolve();
-    expect(spawnBackend).not.toHaveBeenCalled();
+    const shutdown = stopAllTuiGatewayClients();
+    let settled = false;
+    void shutdown.then(() => {
+      settled = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(settled).toBe(false);
+
+    readiness.resolve();
+    await expect(started).rejects.toThrow(/stopped/i);
+    await shutdown;
+    expect(settled).toBe(true);
+    expect(child.pid).toBe(4120);
+  });
+
+  // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Cancelled startup cannot outlive Desktop]]
+  it("bounds stop when TUI readiness never settles", async () => {
+    vi.useFakeTimers();
+    try {
+      const readiness = deferred<void>();
+      const { dependencies, spawnBackend } = lifecycleDependencies({
+        waitForDashboardReady: vi.fn(() => readiness.promise),
+      });
+      const client = new TuiGatewayClient("never-ready", {}, dependencies);
+
+      const started = client.start();
+      void started.catch(() => undefined);
+      await vi.waitFor(() => expect(spawnBackend).toHaveBeenCalledOnce());
+
+      const stopping = client.stop();
+      await vi.advanceTimersByTimeAsync(3_000);
+      await expect(stopping).resolves.toBeUndefined();
+      await expect(started).rejects.toThrow(/stopped/i);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Cancelled startup cannot outlive Desktop]]
@@ -284,6 +346,114 @@ describe("TuiGatewayClient lifecycle", () => {
     await expect(client.stop()).resolves.toBeUndefined();
     expect(dependencies.terminateProcessTree).toHaveBeenCalledTimes(2);
     expect(child.pid).toBe(4120);
+  });
+
+  it("drains an explicit child as well as an older retry ownership handle", async () => {
+    const child = fakeChildProcess(4140);
+    const terminate = vi.fn(async () => ({
+      forced: false,
+      remainingPids: [],
+    }));
+    const retry = vi.fn(async () => ({
+      forced: false,
+      remainingPids: [],
+    }));
+    const client = new TuiGatewayClient(
+      "dual-cleanup",
+      {},
+      {
+        terminateProcessTree:
+          terminate as TuiGatewayClientDependencies["terminateProcessTree"],
+        retryCapturedProcessTermination:
+          retry as TuiGatewayClientDependencies["retryCapturedProcessTermination"],
+      },
+    );
+    const internal = client as unknown as {
+      proc: ChildProcess | null;
+      retryOwnerships: object[];
+    };
+    internal.proc = child;
+    // This opaque value is only used as the key for the injected retry seam;
+    // the real process-tree module creates the private ownership handle.
+    internal.retryOwnerships = [Object.freeze({})];
+
+    await expect(client.stop()).resolves.toBeUndefined();
+
+    expect(retry).toHaveBeenCalledOnce();
+    expect(terminate).toHaveBeenCalledWith(child, expect.any(Object));
+  });
+
+  it("retains retry ownership when the first bounded retry throws", async () => {
+    const retry = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("retry probe failed"))
+      .mockResolvedValueOnce({ forced: false, remainingPids: [] });
+    const client = new TuiGatewayClient(
+      "retry-error",
+      {},
+      {
+        retryCapturedProcessTermination:
+          retry as TuiGatewayClientDependencies["retryCapturedProcessTermination"],
+      },
+    );
+    const internal = client as unknown as {
+      retryOwnerships: object[];
+    };
+    internal.retryOwnerships = [Object.freeze({})];
+
+    await expect(client.stop()).rejects.toThrow("retry probe failed");
+    await expect(client.stop()).resolves.toBeUndefined();
+    expect(retry).toHaveBeenCalledTimes(2);
+  });
+
+  it("retains every retry handle returned by concurrent cleanup targets", async () => {
+    const child = fakeChildProcess(4150);
+    const handleA = Object.freeze({ name: "retry-a" });
+    const handleB = Object.freeze({ name: "retry-b" });
+    const retryCounts = new Map<object, number>();
+    const retry = vi.fn(async (handle: object) => {
+      const count = (retryCounts.get(handle) ?? 0) + 1;
+      retryCounts.set(handle, count);
+      if (handle === handleA && count === 1) {
+        return {
+          forced: false,
+          remainingPids: [4151],
+          retryOwnership: handleA,
+        };
+      }
+      return { forced: false, remainingPids: [] };
+    });
+    const terminate = vi
+      .fn()
+      .mockResolvedValueOnce({
+        forced: false,
+        remainingPids: [4150],
+        retryOwnership: handleB,
+      })
+      .mockResolvedValueOnce({ forced: false, remainingPids: [] });
+    const client = new TuiGatewayClient(
+      "multiple-retries",
+      {},
+      {
+        terminateProcessTree:
+          terminate as TuiGatewayClientDependencies["terminateProcessTree"],
+        retryCapturedProcessTermination:
+          retry as TuiGatewayClientDependencies["retryCapturedProcessTermination"],
+      },
+    );
+    const internal = client as unknown as {
+      proc: ChildProcess | null;
+      retryOwnerships: object[];
+    };
+    internal.proc = child;
+    internal.retryOwnerships = [handleA];
+
+    await expect(client.stop()).rejects.toThrow(/did not fully exit/i);
+    await expect(client.stop()).resolves.toBeUndefined();
+
+    expect(retry).toHaveBeenCalledWith(handleA, expect.any(Object));
+    expect(retry).toHaveBeenCalledWith(handleB, expect.any(Object));
+    expect(retry).toHaveBeenCalledTimes(3);
   });
 
   // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Pool-wide App shutdown]]
@@ -381,6 +551,25 @@ describe("TuiGatewayClient lifecycle", () => {
     );
     await stopAllTuiGatewayClients();
     expect(stop).toHaveBeenCalledTimes(2);
+  });
+
+  // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Pool-wide App shutdown]]
+  it("reopens TUI admission after an explicit retry drains the failed client", async () => {
+    const existing = getTuiGatewayClient("retry-direct");
+    const stop = vi
+      .spyOn(existing, "stop")
+      .mockRejectedValueOnce(new Error("owned Runtime remained"))
+      .mockResolvedValueOnce();
+
+    await expect(stopAllTuiGatewayClients()).rejects.toThrow(
+      "owned Runtime remained",
+    );
+    await expect(
+      retireTuiGatewayClient("retry-direct"),
+    ).resolves.toBeUndefined();
+
+    expect(stop).toHaveBeenCalledTimes(2);
+    expect(() => getTuiGatewayClient("after-direct-retry")).not.toThrow();
   });
 
   // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Pool-wide App shutdown]]

@@ -41,6 +41,7 @@ import { showChatContextMenu } from "./context-menu";
 import { buildMenu } from "./menu";
 import { setupUpdater } from "./updater";
 import { createQuitBarrier } from "./quit-barrier";
+import { settleRuntimeCleanup } from "./runtime-cleanup";
 import { DESKTOP_APP_ID, DESKTOP_PRODUCT_NAME } from "../../shared/branding";
 import { getAgenteraCloudOrigin } from "../agentera-auth/config";
 import { AgenteraCloudClient } from "../agentera-auth/client";
@@ -926,12 +927,14 @@ export async function stopActiveRuntimeContext(
       throw error;
     }
   };
-
   const tuiShutdown = runCleanupStep("tui", () =>
     stopAllTuiGatewayClients({
       closePool: options.closeTuiGatewayPool,
     }),
   );
+  // This branch starts before active runs drain. Observe an early rejection;
+  // settleRuntimeCleanup still owns and aggregates its eventual result.
+  void tuiShutdown.catch(() => undefined);
   stopHealthPolling();
   runtimeActivity.abortAll();
   // Aborting a run only signals its transport.  Do not tear down the
@@ -940,34 +943,30 @@ export async function stopActiveRuntimeContext(
   // into the newly mounted context.
   await runCleanupStep("runtime_activity", () => runtimeActivity.waitForIdle());
   cleanupTempMediaFiles();
-  stopAllDashboards();
   // A Profile or connection context must never remain mounted across an
   // Aera owner transition. Stop local execution, remote/SSH transport,
   // and cached SQLite access before the next owner can claim a context.
-  logCleanup("gateway", "begin");
-  const gatewayShutdown = stopAeraOwnedGateways();
-  const observedGatewayShutdown = gatewayShutdown.then(
-    (result) => {
-      logCleanup("gateway", "complete");
-      return result;
+  await settleRuntimeCleanup([
+    () => tuiShutdown,
+    () =>
+      runCleanupStep("dashboards", () =>
+        stopAllDashboards({ closePool: options.closeTuiGatewayPool }),
+      ),
+    () => {
+      logCleanup("gateway", "begin");
+      return stopAeraOwnedGateways().then(
+        () => {
+          logCleanup("gateway", "complete");
+        },
+        (error) => {
+          logCleanup("gateway", "failed");
+          throw error;
+        },
+      );
     },
-    (error) => {
-      logCleanup("gateway", "failed");
-      throw error;
-    },
-  );
-  await runCleanupStep("ssh_transport", () => stopSshTunnel());
-  await runCleanupStep("database", () => closeDbConnection());
-  const results = await Promise.allSettled([
-    tuiShutdown,
-    observedGatewayShutdown,
+    () => runCleanupStep("ssh_transport", () => stopSshTunnel()),
+    () => runCleanupStep("database", () => closeDbConnection()),
   ]);
-  const errors = results.flatMap((result) =>
-    result.status === "rejected" ? [result.reason] : [],
-  );
-  if (errors.length > 0) {
-    throw new AggregateError(errors, "Aera Runtime cleanup failed.");
-  }
 }
 
 function notifyConnectionConfigChanged(catalogRevision?: string): void {

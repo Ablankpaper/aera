@@ -30,7 +30,18 @@ async function refreshImageGenerationRuntime(
   profile: string | undefined,
   dependencies: Omit<ImageGenerationRuntimeRefreshDependencies, "save">,
 ): Promise<void> {
-  dependencies.stopDashboard(profile);
+  try {
+    await dependencies.stopDashboard(profile);
+  } catch (error) {
+    // The configuration write has already committed.  Keep the public save
+    // result truthful while retaining the Dashboard's own cleanup failure for
+    // its bounded lifecycle retry/status path; do not surface it as a write
+    // failure to the image-generation form.
+    console.warn(
+      `[image-generation:${profile ?? "default"}] Dashboard refresh cleanup incomplete:`,
+      error instanceof Error ? error.message : String(error),
+    );
+  }
   try {
     await dependencies.retireTuiGatewayClient(profile);
   } catch {

@@ -40,7 +40,7 @@ type SaveConfig = (
   profile: string | undefined,
   request: ImageGenerationConfigDraft,
 ) => ImageGenerationSaveResult;
-type StopDashboard = (profile?: string) => void;
+type StopDashboard = (profile?: string) => void | Promise<void>;
 type RetireTuiGatewayClient = (profile?: string) => Promise<void>;
 type NotifyRuntimeSnapshotChanged = (profile?: string) => void;
 type IsGatewayRunning = (profile?: string) => boolean;
@@ -157,6 +157,25 @@ describe("image generation Runtime refresh", () => {
     expect(result).toEqual(successResult());
     expect(deps.notifyRuntimeSnapshotChanged).toHaveBeenCalledWith(profile);
     expect(deps.isGatewayRunning).toHaveBeenCalledWith(profile);
+    expect(deps.restartGateway).toHaveBeenCalledWith(profile);
+  });
+
+  // @lat: [[image-generation#Runtime snapshot refresh]]
+  it("keeps a committed save truthful when Dashboard cleanup is incomplete", async () => {
+    const deps = dependencies();
+    deps.stopDashboard.mockRejectedValue(
+      new Error("fixture Dashboard cleanup failure"),
+    );
+
+    const result = await saveImageGenerationConfigAndRefresh(
+      profile,
+      draft,
+      deps,
+    );
+
+    expect(result).toEqual(successResult());
+    expect(deps.retireTuiGatewayClient).toHaveBeenCalledWith(profile);
+    expect(deps.notifyRuntimeSnapshotChanged).toHaveBeenCalledWith(profile);
     expect(deps.restartGateway).toHaveBeenCalledWith(profile);
   });
 

@@ -16,6 +16,13 @@ export interface TerminateProcessTreeOptions extends KillProcessTreeOptions {
   commandTimeoutMs?: number;
   /** Stable, non-secret Profile label included in Windows diagnostics. */
   diagnosticProfileKey?: string;
+  /**
+   * Optional caller-owned proof checked immediately before a signal can target
+   * the root/tree. Gateway lifecycle callers use this to re-read both the
+   * persisted creation identity and canonical executable image; a false or
+   * throwing verifier is fail-closed and leaves the live tree untouched.
+   */
+  verifyRootOwnership?: (rootPid: number) => boolean;
   /** Deterministic diagnostic seam used by focused lifecycle tests. */
   onDiagnostic?: (diagnostic: ProcessTreeTerminationDiagnostic) => void;
   /** Deterministic process seams used by focused lifecycle tests. */
@@ -27,9 +34,21 @@ export interface CapturedProcessIdentity {
   identity: string;
 }
 
+/**
+ * Opaque ownership for a bounded cleanup retry.  The value is deliberately
+ * backed by a WeakMap below rather than exposing a PID list to callers: a
+ * retry must revalidate the original process creation identities before it
+ * can signal anything.
+ */
+export interface ProcessTreeRetryOwnership {
+  readonly __aeraProcessTreeRetryOwnership: unique symbol;
+}
+
 export interface ProcessTreeTerminationResult {
   forced: boolean;
   remainingPids: number[];
+  /** Present only when an exact, identity-bound retry is possible. */
+  retryOwnership?: ProcessTreeRetryOwnership;
 }
 
 export interface ProcessSnapshotRecord extends CapturedProcessIdentity {
@@ -39,6 +58,8 @@ export interface ProcessSnapshotRecord extends CapturedProcessIdentity {
 export interface ProcessSnapshotRequest {
   rootPid: number;
   candidatePids?: readonly number[];
+  /** A targeted retry may legitimately observe that every candidate exited. */
+  allowEmpty?: boolean;
   timeoutMs: number;
   phase?: ProcessTreeDiagnosticPhase;
   attempt?: number;
@@ -96,6 +117,48 @@ export interface ProcessTreeTerminationOperations {
 
 type ProcessRecord = ProcessSnapshotRecord;
 
+/**
+ * Parse the bounded Windows process-table payload used by the legacy
+ * descendant adapter. Keep the creation token in the same canonical form as
+ * `parseWindowsSnapshot()` (`windows:<FILETIME>`); otherwise a real Windows
+ * fallback compares a raw WMI DateTime string with a FILETIME snapshot and
+ * incorrectly refuses every descendant signal.
+ */
+export function parseWindowsProcessRecords(raw: string): ProcessRecord[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return [];
+  }
+  const rows = Array.isArray(parsed) ? parsed : [parsed];
+  return rows.flatMap((row): ProcessRecord[] => {
+    if (!row || typeof row !== "object" || Array.isArray(row)) return [];
+    const value = row as Record<string, unknown>;
+    const processId = Number(value.ProcessId);
+    const parentPid = Number(value.ParentProcessId);
+    if (
+      !Number.isSafeInteger(processId) ||
+      processId <= 0 ||
+      !Number.isSafeInteger(parentPid) ||
+      parentPid < 0
+    ) {
+      return [];
+    }
+    const creationFileTime = normalizeWindowsFileTime(
+      value.CreationFileTimeUtc,
+    );
+    return [
+      {
+        pid: processId,
+        parentPid,
+        identity:
+          creationFileTime === null ? "" : `windows:${creationFileTime}`,
+      },
+    ];
+  });
+}
+
 function processRecords(): ProcessRecord[] {
   if (process.platform === "win32") {
     try {
@@ -107,7 +170,10 @@ function processRecords(): ProcessRecord[] {
           "-Command",
           "$ErrorActionPreference='Stop'; " +
             "Get-CimInstance Win32_Process | " +
-            "Select-Object ProcessId,ParentProcessId,CreationDate | " +
+            "Select-Object ProcessId,ParentProcessId," +
+            "@{Name='CreationFileTimeUtc';Expression={" +
+            "$_.CreationDate.ToFileTimeUtc().ToString(" +
+            "[Globalization.CultureInfo]::InvariantCulture)}} | " +
             "ConvertTo-Json -Compress",
         ],
         {
@@ -117,29 +183,7 @@ function processRecords(): ProcessRecord[] {
           stdio: ["ignore", "pipe", "ignore"],
         },
       );
-      const parsed: unknown = JSON.parse(output);
-      const rows = Array.isArray(parsed) ? parsed : [parsed];
-      return rows.flatMap((row): ProcessRecord[] => {
-        if (!row || typeof row !== "object" || Array.isArray(row)) {
-          return [];
-        }
-        const value = row as Record<string, unknown>;
-        const pid = Number(value.ProcessId);
-        const parentPid = Number(value.ParentProcessId);
-        if (
-          !Number.isSafeInteger(pid) ||
-          pid <= 0 ||
-          !Number.isSafeInteger(parentPid) ||
-          parentPid < 0
-        ) {
-          return [];
-        }
-        const identity =
-          typeof value.CreationDate === "string"
-            ? value.CreationDate.trim()
-            : "";
-        return [{ pid, parentPid, identity }];
-      });
+      return parseWindowsProcessRecords(String(output));
     } catch {
       return [];
     }
@@ -472,6 +516,10 @@ export async function captureWindowsSnapshot(
     ? records.filter((record) => candidates.has(record.pid))
     : records;
   if (result.length === 0) {
+    if (request.allowEmpty && request.candidatePids) {
+      emitDiagnostic(request, Date.now() - startedAt, "captured");
+      return [];
+    }
     emitDiagnostic(request, Date.now() - startedAt, "invalid");
     return null;
   }
@@ -612,6 +660,45 @@ function childProcessIsAlive(
   );
 }
 
+function rootOwnershipVerified(
+  rootPid: number,
+  verify: TerminateProcessTreeOptions["verifyRootOwnership"],
+): boolean {
+  if (!verify) return true;
+  try {
+    return verify(rootPid) === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A Windows tree snapshot is only a point-in-time list.  Before falling back
+ * from taskkill to per-PID signalling, re-read each captured descendant's
+ * creation identity at the signal boundary.  A PID that was reused after the
+ * initial snapshot must be left untouched.  Deterministic callers that supply
+ * a custom snapshot seam but no identity seam retain the historical generic
+ * tree behavior; Gateway callers use the real/default identity reader (or an
+ * explicit deterministic seam) and therefore take this fail-closed branch.
+ */
+function descendantIdentityVerified(
+  captured: CapturedProcessIdentity,
+  operations: ProcessTreeTerminationOperations,
+  _customOperations: Partial<ProcessTreeTerminationOperations> | undefined,
+): boolean {
+  if (process.platform !== "win32") return true;
+  try {
+    const observed = operations.processIdentity(captured.pid);
+    return (
+      typeof observed === "string" &&
+      observed.trim().length > 0 &&
+      observed.trim() === captured.identity.trim()
+    );
+  } catch {
+    return false;
+  }
+}
+
 function wait(delayMs: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, delayMs));
 }
@@ -645,6 +732,97 @@ async function gracefulWindowsTree(
 interface CapturedProcessTree {
   root: ProcessSnapshotRecord;
   descendants: CapturedProcessIdentity[];
+}
+
+interface RetryOwnershipRecord {
+  rootPid: number;
+  processes: readonly CapturedProcessIdentity[];
+}
+
+const retryOwnershipRecords = new WeakMap<object, RetryOwnershipRecord>();
+
+function createRetryOwnership(
+  tree: CapturedProcessTree,
+): ProcessTreeRetryOwnership {
+  // A null-prototype frozen object is not useful as a PID-shaped target and
+  // cannot be manufactured into a valid handle without access to the
+  // WeakMap.  Keep the actual identities private to this module.
+  const handle = Object.freeze(Object.create(null)) as object;
+  retryOwnershipRecords.set(handle, {
+    rootPid: tree.root.pid,
+    processes: Object.freeze([
+      { pid: tree.root.pid, identity: tree.root.identity },
+      ...tree.descendants.map((process) => ({ ...process })),
+    ]),
+  });
+  return handle as ProcessTreeRetryOwnership;
+}
+
+function attachRetryOwnership(
+  forced: boolean,
+  remainingPids: readonly number[],
+  tree: CapturedProcessTree,
+  existing?: ProcessTreeRetryOwnership,
+): ProcessTreeTerminationResult {
+  const remaining = [...new Set(remainingPids)];
+  const result: ProcessTreeTerminationResult = {
+    forced,
+    remainingPids: remaining,
+  };
+  if (remaining.length === 0) return result;
+  // POSIX callers retain the dedicated process-group leader and can safely
+  // retry through terminateProcessTree itself.  The opaque PID/identity
+  // handle is specifically for Windows reparenting, where the dead wrapper
+  // can no longer be used to rediscover its descendants.
+  if (existing === undefined && process.platform !== "win32") return result;
+  const ownership =
+    existing !== undefined ? existing : createRetryOwnership(tree);
+  // Keep the handle non-enumerable so existing diagnostics/results remain
+  // JSON-safe while internal callers can still access it directly.
+  Object.defineProperty(result, "retryOwnership", {
+    configurable: false,
+    enumerable: false,
+    value: ownership,
+    writable: false,
+  });
+  return result;
+}
+
+function retryCapturedTree(record: RetryOwnershipRecord): CapturedProcessTree {
+  const root = record.processes.find(
+    (process) => process.pid === record.rootPid,
+  );
+  const rootIdentity = root?.identity ?? "";
+  return {
+    root: { pid: record.rootPid, parentPid: 0, identity: rootIdentity },
+    descendants: record.processes
+      .filter((process) => process.pid !== record.rootPid)
+      .map((process) => ({ ...process })),
+  };
+}
+
+function indexRetrySnapshot(
+  snapshot: readonly ProcessSnapshotRecord[],
+  candidates: readonly number[],
+): Map<number, string> | null {
+  if (!Array.isArray(snapshot)) return null;
+  const candidateSet = new Set(candidates);
+  const identities = new Map<number, string>();
+  for (const record of snapshot) {
+    if (
+      !record ||
+      !Number.isSafeInteger(record.pid) ||
+      record.pid <= 0 ||
+      typeof record.identity !== "string" ||
+      !record.identity.trim()
+    ) {
+      return null;
+    }
+    if (!candidateSet.has(record.pid)) continue;
+    if (identities.has(record.pid)) return null;
+    identities.set(record.pid, record.identity);
+  }
+  return identities;
 }
 
 function buildCapturedProcessTree(
@@ -732,6 +910,83 @@ async function captureForPhase(
   return operations.captureSnapshot(request);
 }
 
+/**
+ * Build the POSIX snapshot needed by the PID-only adapter.
+ *
+ * `captureProcessSnapshot` intentionally remains Windows-only: ordinary
+ * POSIX children are shut down through their verified dedicated process
+ * group, which does not need a process-table walk.  A daemonized Gateway is
+ * different — its wrapper has exited and only the listener PID remains.  In
+ * that case we still need one exact creation-identity observation before
+ * signalling the PID, followed by the same identity refreshes used by the
+ * regular tree path.  A missing/blank identity is unavailable evidence, not
+ * permission to signal.
+ */
+async function capturePosixPidSnapshot(
+  request: ProcessSnapshotRequest,
+  processIdentityForPid: (pid: number) => string | null,
+  descendantProcessesForRoot: (rootPid: number) => CapturedProcessIdentity[],
+  pidIsAliveForPid: (pid: number) => boolean,
+): Promise<readonly ProcessSnapshotRecord[] | null> {
+  const candidates = request.candidatePids
+    ? [...new Set(request.candidatePids)]
+    : null;
+  if (candidates !== null) {
+    if (
+      candidates.some(
+        (candidate) => !Number.isSafeInteger(candidate) || candidate <= 0,
+      )
+    ) {
+      return null;
+    }
+    const records: ProcessSnapshotRecord[] = [];
+    for (const pid of candidates) {
+      // A candidate that has already exited is ordinary lifecycle progress,
+      // not an unavailable identity query.  Omit it so the caller can
+      // distinguish "gone" from a live PID whose identity could not be read.
+      if (!pidIsAliveForPid(pid)) continue;
+      const rawIdentity = processIdentityForPid(pid);
+      const identity =
+        typeof rawIdentity === "string" ? rawIdentity.trim() : "";
+      if (!identity) return null;
+      records.push({ pid, parentPid: 0, identity });
+    }
+    if (records.length === 0 && !request.allowEmpty) return null;
+    return records;
+  }
+
+  const rawRootIdentity = processIdentityForPid(request.rootPid);
+  const rootIdentity =
+    typeof rawRootIdentity === "string" ? rawRootIdentity.trim() : "";
+  if (!rootIdentity) return null;
+  const descendants = descendantProcessesForRoot(request.rootPid);
+  if (!Array.isArray(descendants)) return null;
+  const seen = new Set<number>([request.rootPid]);
+  const records: ProcessSnapshotRecord[] = [
+    { pid: request.rootPid, parentPid: 0, identity: rootIdentity },
+  ];
+  for (const descendant of descendants) {
+    if (
+      !descendant ||
+      !Number.isSafeInteger(descendant.pid) ||
+      descendant.pid <= 0 ||
+      seen.has(descendant.pid) ||
+      typeof descendant.identity !== "string"
+    ) {
+      return null;
+    }
+    const identity = descendant.identity.trim();
+    if (!identity) return null;
+    seen.add(descendant.pid);
+    records.push({
+      pid: descendant.pid,
+      parentPid: request.rootPid,
+      identity,
+    });
+  }
+  return records;
+}
+
 function capturedPidsAlive(
   proc: ChildProcess,
   descendants: readonly CapturedProcessIdentity[],
@@ -789,6 +1044,7 @@ async function terminateDedicatedProcessGroup(
   pollIntervalMs: number,
   commandTimeoutMs: number,
   operations: ProcessTreeTerminationOperations,
+  verifyRootOwnership: TerminateProcessTreeOptions["verifyRootOwnership"],
 ): Promise<ProcessTreeTerminationResult> {
   if (!operations.processGroupIsAlive(processGroupId)) {
     if (childProcessIsAlive(proc, operations.pidIsAlive)) {
@@ -827,6 +1083,9 @@ async function terminateDedicatedProcessGroup(
     );
   }
 
+  if (!rootOwnershipVerified(processGroupId, verifyRootOwnership)) {
+    return { forced: false, remainingPids: [...initialPids] };
+  }
   operations.signalProcessGroup(processGroupId, "SIGTERM");
   let alive = await waitForProcessGroupExit(
     processGroupId,
@@ -836,6 +1095,18 @@ async function terminateDedicatedProcessGroup(
   );
   if (!alive) return { forced: false, remainingPids: [] };
 
+  if (!rootOwnershipVerified(processGroupId, verifyRootOwnership)) {
+    const remainingPids = await operations.processGroupPids(
+      processGroupId,
+      commandTimeoutMs,
+    );
+    if (remainingPids === null) {
+      throw new Error(
+        `Desktop-owned process group ${processGroupId} ownership could not be reverified`,
+      );
+    }
+    return { forced: false, remainingPids: [...remainingPids] };
+  }
   operations.signalProcessGroup(processGroupId, "SIGKILL");
   alive = await waitForProcessGroupExit(
     processGroupId,
@@ -959,6 +1230,7 @@ export async function terminateProcessTree(
       pollIntervalMs,
       commandTimeoutMs,
       operations,
+      options.verifyRootOwnership,
     );
   }
 
@@ -1025,24 +1297,42 @@ export async function terminateProcessTree(
   const { root, descendants } = capturedTree;
   const rootAlive = childProcessIsAlive(proc, operations.pidIsAlive);
 
+  // Snapshot identity is necessary to bind the tree, but Gateway callers also
+  // persist the executable image. Re-read that complete caller-owned proof at
+  // the last boundary before TERM/taskkill can affect the root or descendants.
+  if (
+    rootAlive &&
+    !rootOwnershipVerified(rootPid, options.verifyRootOwnership)
+  ) {
+    return attachRetryOwnership(
+      false,
+      capturedPidsAlive(proc, descendants, operations),
+      capturedTree,
+    );
+  }
+
   let windowsTreeSignalled = false;
   if (process.platform === "win32" && rootAlive) {
-    const gracefulStartedAt = Date.now();
-    try {
-      await operations.gracefulWindowsTree(rootPid, commandTimeoutMs);
-      windowsTreeSignalled = true;
-      emitWindowsTerminationDiagnostic(
-        {
-          rootPid,
-          phase: "graceful-taskkill",
-          attempt: 1,
-          profileKey: options.diagnosticProfileKey,
-          onDiagnostic: options.onDiagnostic,
-        },
-        Date.now() - gracefulStartedAt,
-        "success",
+    // Descendant inspection and command preparation can yield between the
+    // initial ownership check and the platform tree call. Re-read the root's
+    // caller-owned proof at this signal boundary as well.
+    if (!rootOwnershipVerified(rootPid, options.verifyRootOwnership)) {
+      return attachRetryOwnership(
+        false,
+        capturedPidsAlive(proc, descendants, operations),
+        capturedTree,
       );
-    } catch {
+    }
+    // `taskkill /T` can affect every descendant currently attached to the
+    // root. Revalidate each captured descendant immediately before invoking it;
+    // if any identity has changed, fall back to individually gated signals so
+    // a reused PID can never be swept up by the tree command.
+    const descendantsVerifiedForGracefulTree = descendants.every(
+      (child) =>
+        !operations.pidIsAlive(child.pid) ||
+        descendantIdentityVerified(child, operations, customOperations),
+    );
+    if (!descendantsVerifiedForGracefulTree) {
       emitWindowsTerminationDiagnostic(
         {
           rootPid,
@@ -1051,21 +1341,59 @@ export async function terminateProcessTree(
           profileKey: options.diagnosticProfileKey,
           onDiagnostic: options.onDiagnostic,
         },
-        Date.now() - gracefulStartedAt,
+        0,
         "failed",
       );
-      // Fall through to exact captured PID signalling.
+    }
+    if (descendantsVerifiedForGracefulTree) {
+      const gracefulStartedAt = Date.now();
+      try {
+        await operations.gracefulWindowsTree(rootPid, commandTimeoutMs);
+        windowsTreeSignalled = true;
+        emitWindowsTerminationDiagnostic(
+          {
+            rootPid,
+            phase: "graceful-taskkill",
+            attempt: 1,
+            profileKey: options.diagnosticProfileKey,
+            onDiagnostic: options.onDiagnostic,
+          },
+          Date.now() - gracefulStartedAt,
+          "success",
+        );
+      } catch {
+        emitWindowsTerminationDiagnostic(
+          {
+            rootPid,
+            phase: "graceful-taskkill",
+            attempt: 1,
+            profileKey: options.diagnosticProfileKey,
+            onDiagnostic: options.onDiagnostic,
+          },
+          Date.now() - gracefulStartedAt,
+          "failed",
+        );
+        // Fall through to exact captured PID signalling.
+      }
     }
   }
   if (!windowsTreeSignalled) {
     for (const child of descendants) {
-      if (operations.pidIsAlive(child.pid)) {
+      if (
+        operations.pidIsAlive(child.pid) &&
+        descendantIdentityVerified(child, operations, customOperations)
+      ) {
         operations.signalPid(child.pid, "SIGTERM");
       }
     }
   }
   if (rootAlive && !windowsTreeSignalled) {
-    signalOwnedRoot(proc, "SIGTERM", detachedProcessGroup);
+    // The descendant loop above performs fresh identity checks and may itself
+    // take observable time. Do not use the earlier snapshot proof for the
+    // root signal; a reused root PID must remain untouched.
+    if (rootOwnershipVerified(rootPid, options.verifyRootOwnership)) {
+      signalOwnedRoot(proc, "SIGTERM", detachedProcessGroup);
+    }
   }
 
   let remaining = await waitForCapturedTreeExit(
@@ -1094,7 +1422,7 @@ export async function terminateProcessTree(
     customOperations,
   );
   if (!refreshSnapshot) {
-    return { forced: false, remainingPids: remaining };
+    return attachRetryOwnership(false, remaining, capturedTree);
   }
   const refreshedByPid = new Map(
     refreshSnapshot.map((record) => [record.pid, record.identity]),
@@ -1110,11 +1438,30 @@ export async function terminateProcessTree(
   let forced = false;
   const forcedPids = new Set<number>();
   const remainingSet = new Set(remaining);
+  const rootWillBeForced =
+    remainingSet.has(rootPid) &&
+    verifiedSet.has(rootPid) &&
+    childProcessIsAlive(proc, operations.pidIsAlive);
+  if (
+    rootWillBeForced &&
+    !rootOwnershipVerified(rootPid, options.verifyRootOwnership)
+  ) {
+    return attachRetryOwnership(false, remaining, capturedTree);
+  }
   if (process.platform === "win32") {
+    const descendantsVerifiedForForceTree = descendants.every(
+      (child) =>
+        !remainingSet.has(child.pid) ||
+        !operations.pidIsAlive(child.pid) ||
+        (verifiedSet.has(child.pid) &&
+          descendantIdentityVerified(child, operations, customOperations)),
+    );
     if (
       remainingSet.has(rootPid) &&
       verifiedSet.has(rootPid) &&
-      childProcessIsAlive(proc, operations.pidIsAlive)
+      childProcessIsAlive(proc, operations.pidIsAlive) &&
+      descendantsVerifiedForForceTree &&
+      rootOwnershipVerified(rootPid, options.verifyRootOwnership)
     ) {
       const forceStartedAt = Date.now();
       try {
@@ -1146,7 +1493,8 @@ export async function terminateProcessTree(
         );
         if (
           verifiedSet.has(rootPid) &&
-          childProcessIsAlive(proc, operations.pidIsAlive)
+          childProcessIsAlive(proc, operations.pidIsAlive) &&
+          rootOwnershipVerified(rootPid, options.verifyRootOwnership)
         ) {
           signalOwnedRoot(proc, "SIGKILL", false);
           forced = true;
@@ -1159,7 +1507,8 @@ export async function terminateProcessTree(
     if (
       remainingSet.has(child.pid) &&
       verifiedSet.has(child.pid) &&
-      operations.pidIsAlive(child.pid)
+      operations.pidIsAlive(child.pid) &&
+      descendantIdentityVerified(child, operations, customOperations)
     ) {
       operations.signalPid(child.pid, "SIGKILL");
       forced = true;
@@ -1170,7 +1519,8 @@ export async function terminateProcessTree(
     process.platform !== "win32" &&
     remainingSet.has(rootPid) &&
     verifiedSet.has(rootPid) &&
-    childProcessIsAlive(proc, operations.pidIsAlive)
+    childProcessIsAlive(proc, operations.pidIsAlive) &&
+    rootOwnershipVerified(rootPid, options.verifyRootOwnership)
   ) {
     signalOwnedRoot(proc, "SIGKILL", detachedProcessGroup);
     forced = true;
@@ -1185,7 +1535,7 @@ export async function terminateProcessTree(
     operations,
   );
   if (!forced || remaining.length === 0) {
-    return { forced, remainingPids: remaining };
+    return attachRetryOwnership(forced, remaining, capturedTree);
   }
 
   const finalSnapshot = await captureForPhase(
@@ -1202,17 +1552,312 @@ export async function terminateProcessTree(
     operations,
     customOperations,
   );
-  if (!finalSnapshot) return { forced, remainingPids: remaining };
+  if (!finalSnapshot) {
+    return attachRetryOwnership(forced, remaining, capturedTree);
+  }
   const finalByPid = new Map(
     finalSnapshot.map((record) => [record.pid, record.identity]),
   );
   remaining = remaining.filter((pid) => {
     if (!forcedPids.has(pid)) return true;
-    if (!finalByPid.has(pid)) return false;
+    if (!finalByPid.has(pid)) return operations.pidIsAlive(pid);
     const finalIdentity = finalByPid.get(pid);
     return !finalIdentity || finalIdentity === capturedByPid.get(pid);
   });
-  return { forced, remainingPids: remaining };
+  return attachRetryOwnership(forced, remaining, capturedTree);
+}
+
+/**
+ * Retry cleanup using the identities captured by an earlier termination.
+ *
+ * This path intentionally never re-derives a tree from a dead wrapper/root.
+ * Windows descendants can be reparented when that wrapper exits; the only
+ * safe operation is to refresh each captured PID's creation identity and then
+ * signal that PID only while the identity still matches.  A missing PID or a
+ * changed identity means the originally owned process is gone (and the new
+ * occupant is left untouched).  An unavailable refresh is fail-closed.
+ */
+export async function retryCapturedProcessTermination(
+  ownership: ProcessTreeRetryOwnership,
+  options: TerminateProcessTreeOptions = {},
+): Promise<ProcessTreeTerminationResult> {
+  const record = retryOwnershipRecords.get(ownership as object);
+  if (!record) {
+    throw new Error("Invalid Aera process-tree retry ownership.");
+  }
+
+  const operations: ProcessTreeTerminationOperations = {
+    captureSnapshot: captureProcessSnapshot,
+    descendantPids,
+    descendantProcesses,
+    processIdentity,
+    pidIsAlive,
+    signalPid,
+    gracefulWindowsTree,
+    forceWindowsTree,
+    processGroupIsAlive,
+    processGroupPids,
+    signalProcessGroup,
+    wait,
+    ...options.operations,
+  };
+  const customOperations = options.operations;
+  const forceAfterMs = Math.max(0, options.forceAfterMs ?? 3_000);
+  const pollIntervalMs = Math.max(1, options.pollIntervalMs ?? 50);
+  const forceSettleMs = Math.max(
+    0,
+    options.forceSettleMs ?? (process.platform === "win32" ? 3_000 : 500),
+  );
+  const snapshotTimeoutMs = Math.max(
+    1,
+    options.snapshotTimeoutMs ?? DEFAULT_SNAPSHOT_TIMEOUT_MS,
+  );
+  const snapshotTotalBudgetMs = Math.max(
+    1,
+    Math.min(
+      options.snapshotTotalBudgetMs ?? snapshotTimeoutMs * 2,
+      snapshotTimeoutMs * 2,
+    ),
+  );
+  const processes = record.processes;
+
+  const refresh = async (
+    candidates: readonly number[],
+    attempt: number,
+  ): Promise<readonly ProcessSnapshotRecord[] | null> => {
+    if (candidates.length === 0) return [];
+    // A caller that supplies legacy seams (used by POSIX-focused tests and
+    // older embedders) cannot query a dead root with the tree helper.  Query
+    // exact identities directly in that case; the default Windows path uses
+    // one bounded targeted CIM/WMI snapshot instead.
+    if (
+      customOperations?.captureSnapshot === undefined &&
+      (customOperations?.processIdentity ||
+        customOperations?.descendantProcesses ||
+        customOperations?.descendantPids)
+    ) {
+      const records: ProcessSnapshotRecord[] = [];
+      for (const pid of candidates) {
+        const identity = operations.processIdentity(pid);
+        // A legacy identity seam cannot distinguish "the process exited"
+        // from "the identity query failed".  Treat a missing value as
+        // unavailable and retain ownership rather than clearing a live PID
+        // on an ambiguous probe.
+        if (!identity?.trim()) return null;
+        records.push({ pid, parentPid: 0, identity });
+      }
+      return records;
+    }
+    return captureForPhase(
+      {
+        rootPid: record.rootPid,
+        candidatePids: candidates,
+        allowEmpty: true,
+        timeoutMs:
+          process.platform === "win32"
+            ? Math.min(snapshotTotalBudgetMs, snapshotTimeoutMs)
+            : snapshotTimeoutMs,
+        phase: "identity-refresh",
+        attempt,
+        strategy: "cim",
+        profileKey: options.diagnosticProfileKey,
+        onDiagnostic: options.onDiagnostic,
+      },
+      operations,
+      customOperations,
+    );
+  };
+
+  const liveCandidates = processes
+    .filter((captured) => operations.pidIsAlive(captured.pid))
+    .map((captured) => captured.pid);
+  if (liveCandidates.length === 0) {
+    return { forced: false, remainingPids: [] };
+  }
+
+  const capturedByPid = new Map(
+    processes.map((captured) => [captured.pid, captured.identity] as const),
+  );
+  const initial = await refresh(liveCandidates, 1);
+  if (initial === null) {
+    return attachRetryOwnership(
+      false,
+      liveCandidates,
+      retryCapturedTree(record),
+      ownership,
+    );
+  }
+  const initialByPid = indexRetrySnapshot(initial, liveCandidates);
+  if (initialByPid === null) {
+    return attachRetryOwnership(
+      false,
+      liveCandidates,
+      retryCapturedTree(record),
+      ownership,
+    );
+  }
+  // An empty targeted snapshot is unavailable evidence when an independent
+  // liveness probe still sees any candidate. Never clear ownership on that
+  // contradictory observation.
+  if (
+    initial.length === 0 &&
+    liveCandidates.some((candidate) => operations.pidIsAlive(candidate))
+  ) {
+    return attachRetryOwnership(
+      false,
+      liveCandidates,
+      retryCapturedTree(record),
+      ownership,
+    );
+  }
+  const verified = liveCandidates.filter(
+    (pid) => initialByPid.get(pid) === capturedByPid.get(pid),
+  );
+  // A successful targeted snapshot that omits a PID proves that the original
+  // process is gone.  A changed creation identity is likewise a PID reuse;
+  // neither case is ever signalled.
+  if (verified.length === 0) {
+    return { forced: false, remainingPids: [] };
+  }
+
+  if (
+    verified.includes(record.rootPid) &&
+    !rootOwnershipVerified(record.rootPid, options.verifyRootOwnership)
+  ) {
+    return attachRetryOwnership(
+      false,
+      verified,
+      retryCapturedTree(record),
+      ownership,
+    );
+  }
+
+  let signalError = false;
+  for (const pid of verified) {
+    try {
+      operations.signalPid(pid, "SIGTERM");
+    } catch {
+      signalError = true;
+    }
+  }
+
+  let remaining = await waitForRetryPids(
+    verified,
+    capturedByPid,
+    forceAfterMs,
+    pollIntervalMs,
+    operations,
+    refresh,
+    2,
+  );
+  if (remaining.refreshUnavailable) {
+    return attachRetryOwnership(
+      false,
+      remaining.pids,
+      retryCapturedTree(record),
+      ownership,
+    );
+  }
+  const forceCandidates = remaining.pids;
+  if (
+    forceCandidates.includes(record.rootPid) &&
+    !rootOwnershipVerified(record.rootPid, options.verifyRootOwnership)
+  ) {
+    return attachRetryOwnership(
+      false,
+      forceCandidates,
+      retryCapturedTree(record),
+      ownership,
+    );
+  }
+  let forced = false;
+  for (const pid of forceCandidates) {
+    try {
+      operations.signalPid(pid, "SIGKILL");
+      forced = true;
+    } catch {
+      signalError = true;
+    }
+  }
+
+  remaining = await waitForRetryPids(
+    forceCandidates,
+    capturedByPid,
+    forceSettleMs,
+    pollIntervalMs,
+    operations,
+    refresh,
+    3,
+  );
+  if (remaining.refreshUnavailable) {
+    return attachRetryOwnership(
+      forced,
+      remaining.pids,
+      retryCapturedTree(record),
+      ownership,
+    );
+  }
+  // A signal failure is represented as an ownership failure only when the
+  // original PID is still live and identity-matching.  Do not manufacture a
+  // remaining PID for a process that has already disappeared.
+  if (signalError) {
+    const liveAfterFailure = remaining.pids.filter((pid) =>
+      operations.pidIsAlive(pid),
+    );
+    return attachRetryOwnership(
+      forced,
+      liveAfterFailure,
+      retryCapturedTree(record),
+      ownership,
+    );
+  }
+  return { forced, remainingPids: remaining.pids };
+}
+
+interface RetryPidsResult {
+  pids: number[];
+  refreshUnavailable: boolean;
+}
+
+async function waitForRetryPids(
+  candidates: readonly number[],
+  capturedByPid: ReadonlyMap<number, string>,
+  timeoutMs: number,
+  pollIntervalMs: number,
+  operations: ProcessTreeTerminationOperations,
+  refresh: (
+    candidates: readonly number[],
+    attempt: number,
+  ) => Promise<readonly ProcessSnapshotRecord[] | null>,
+  attempt: number,
+): Promise<RetryPidsResult> {
+  const deadline = Date.now() + timeoutMs;
+  let live = candidates.filter((pid) => operations.pidIsAlive(pid));
+  while (live.length > 0 && Date.now() < deadline) {
+    await operations.wait(
+      Math.min(pollIntervalMs, Math.max(1, deadline - Date.now())),
+    );
+    live = candidates.filter((pid) => operations.pidIsAlive(pid));
+  }
+  if (live.length === 0) return { pids: [], refreshUnavailable: false };
+  const snapshot = await refresh(live, attempt);
+  if (snapshot === null) {
+    return { pids: live, refreshUnavailable: true };
+  }
+  if (
+    snapshot.length === 0 &&
+    live.some((candidate) => operations.pidIsAlive(candidate))
+  ) {
+    return { pids: live, refreshUnavailable: true };
+  }
+  const identities = indexRetrySnapshot(snapshot, candidates);
+  if (identities === null) {
+    return { pids: live, refreshUnavailable: true };
+  }
+  return {
+    pids: live.filter((pid) => identities.get(pid) === capturedByPid.get(pid)),
+    refreshUnavailable: false,
+  };
 }
 
 /**
@@ -1240,6 +1885,34 @@ export function terminateProcessTreeByPid(
       return true;
     },
   } as unknown as ChildProcess;
+  // A daemonized POSIX listener is not a dedicated process-group leader, so
+  // it cannot use the group path.  `captureProcessSnapshot` is intentionally
+  // unavailable on POSIX for ordinary children; provide this PID-only call
+  // with a narrow exact-PID identity snapshot instead.  Preserve an explicit
+  // caller seam (used by deterministic tests/embedders) when supplied.
+  if (
+    process.platform !== "win32" &&
+    (options.detachedProcessGroup ?? false) === false &&
+    options.operations?.captureSnapshot === undefined
+  ) {
+    const processIdentityForPid =
+      options.operations?.processIdentity ?? processIdentity;
+    const descendantProcessesForRoot =
+      options.operations?.descendantProcesses ?? descendantProcesses;
+    return terminateProcessTree(target, {
+      ...options,
+      operations: {
+        ...options.operations,
+        captureSnapshot: (request) =>
+          capturePosixPidSnapshot(
+            request,
+            processIdentityForPid,
+            descendantProcessesForRoot,
+            options.operations?.pidIsAlive ?? pidIsAlive,
+          ),
+      },
+    });
+  }
   return terminateProcessTree(target, options);
 }
 

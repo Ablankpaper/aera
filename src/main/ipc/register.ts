@@ -121,7 +121,6 @@ import {
   transcribeAudio,
   configureGatewayManagedConfiguration,
   prepareGatewayForLaunch,
-  startGateway,
   startGatewayWithReadiness,
   startGatewayWithRecovery,
   stopGateway,
@@ -1039,11 +1038,11 @@ function isRuntimeCredentialEnvKey(key: string): boolean {
   );
 }
 
-function refreshLocalModelRuntimeSnapshot(
+async function refreshLocalModelRuntimeSnapshot(
   previous: { provider: string; model: string; baseUrl: string },
   next: { provider: string; model: string; baseUrl: string },
   profile?: string,
-): boolean {
+): Promise<boolean> {
   const changed =
     previous.provider !== next.provider ||
     previous.model !== next.model ||
@@ -1053,7 +1052,7 @@ function refreshLocalModelRuntimeSnapshot(
   // Dashboard and gateway both snapshot config/env at process start. Retire
   // the dashboard before returning so a send immediately after Save cannot hit
   // the old route; the renderer reconnects lazily.
-  stopDashboard(profile);
+  await stopDashboard(profile);
   if (isGatewayRunning(profile)) {
     void restartGateway(profile);
   }
@@ -1408,8 +1407,8 @@ export function registerIpcHandlers(context: IpcContext): void {
         persistConfigWritePlan(permit, configPlan);
         return true;
       },
-      refreshPresentation: () => {
-        const changed = refreshLocalModelRuntimeSnapshot(
+      refreshPresentation: async () => {
+        const changed = await refreshLocalModelRuntimeSnapshot(
           previous,
           {
             provider: nativeRoute.runtimeProvider,
@@ -3356,9 +3355,9 @@ export function registerIpcHandlers(context: IpcContext): void {
               persistConfigWritePlan(permit, plan);
               return true;
             },
-            refreshPresentation: () => {
+            refreshPresentation: async () => {
               if (!looksLikeCredential) return;
-              stopDashboard(profile);
+              await stopDashboard(profile);
               notifyRuntimeSnapshotChanged();
               if (isGatewayRunning(profile)) void restartGateway(profile);
             },
@@ -5184,8 +5183,8 @@ export function registerIpcHandlers(context: IpcContext): void {
                 persistNativeCustomProviderPlan(permit, nativePlan);
               }
             },
-            refreshPresentation: () => {
-              stopDashboard(profile);
+            refreshPresentation: async () => {
+              await stopDashboard(profile);
               notifyConnectionConfigChanged();
               notifyCustomProvidersChanged();
               if (removedModels > 0) notifyModelLibraryChanged();
@@ -5815,9 +5814,8 @@ export function registerIpcHandlers(context: IpcContext): void {
   ipcMain.handle("claw3d-start-all", (_event, profile?: string) =>
     startOfficeStack(profile, {
       getConnectionConfig,
-      isGatewayRunning,
       prepareGateway: prepareGatewayForLaunch,
-      startGateway,
+      startGatewayWithReadiness,
       sshGatewayStatus,
       sshStartGateway,
       startSshTunnel,

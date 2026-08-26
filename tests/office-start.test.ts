@@ -44,22 +44,18 @@ function makeDeps(
   overrides: Partial<OfficeStartDependencies> = {},
 ): {
   calls: string[];
-  deps: OfficeStartDependencies & {
-    prepareGateway(profile?: string): Promise<void>;
-  };
+  deps: OfficeStartDependencies;
 } {
   const calls: string[] = [];
-  const deps: OfficeStartDependencies & {
-    prepareGateway(profile?: string): Promise<void>;
-  } = {
+  const deps: OfficeStartDependencies = {
     getConnectionConfig: () => connection,
-    isGatewayRunning: () => false,
     prepareGateway: async (profile) => {
       calls.push(`prepareGateway:${profile ?? ""}`);
+      return { key: "prepared-test-key", port: 8642 };
     },
-    startGateway: (profile) => {
-      calls.push(`startGateway:${profile ?? ""}`);
-      return true;
+    startGatewayWithReadiness: async (profile) => {
+      calls.push(`startGatewayWithReadiness:${profile ?? ""}`);
+      return { success: true, running: true, ready: true };
     },
     sshGatewayStatus: async () => false,
     sshStartGateway: async () => {
@@ -92,6 +88,34 @@ function makeDeps(
 }
 
 describe("startOfficeStack", () => {
+  it("does not start local Office until the gateway readiness gate passes", async () => {
+    const { calls, deps } = makeDeps(localConnection());
+    const startGatewayWithReadiness: OfficeStartDependencies["startGatewayWithReadiness"] =
+      async (profile) => {
+        calls.push(`startGatewayWithReadiness:${profile ?? ""}`);
+        return {
+          success: false,
+          running: true,
+          ready: false,
+          error: "The local gateway did not become ready.",
+        };
+      };
+
+    const result = await startOfficeStack("research", {
+      ...deps,
+      startGatewayWithReadiness,
+    });
+
+    expect(result).toEqual({
+      success: false,
+      error: "The local gateway did not become ready.",
+    });
+    expect(calls).toEqual([
+      "prepareGateway:research",
+      "startGatewayWithReadiness:research",
+    ]);
+  });
+
   it("starts the local gateway with the active profile before Claw3D", async () => {
     const { calls, deps } = makeDeps(localConnection());
 
@@ -100,21 +124,34 @@ describe("startOfficeStack", () => {
     expect(result).toEqual({ success: true });
     expect(calls).toEqual([
       "prepareGateway:research",
-      "startGateway:research",
+      "startGatewayWithReadiness:research",
       "startClaw3dAll",
       "waitForClaw3dReady",
     ]);
   });
 
-  it("does not restart a local gateway that is already running", async () => {
+  it("still proves readiness when a local gateway is already running", async () => {
     const { calls, deps } = makeDeps(localConnection(), {
-      isGatewayRunning: () => true,
+      startGatewayWithReadiness: async (profile) => {
+        calls.push(`startGatewayWithReadiness:${profile ?? ""}`);
+        return {
+          success: true,
+          running: true,
+          alreadyRunning: true,
+          ready: true,
+        };
+      },
     });
 
     const result = await startOfficeStack("research", deps);
 
     expect(result).toEqual({ success: true });
-    expect(calls).toEqual(["startClaw3dAll", "waitForClaw3dReady"]);
+    expect(calls).toEqual([
+      "prepareGateway:research",
+      "startGatewayWithReadiness:research",
+      "startClaw3dAll",
+      "waitForClaw3dReady",
+    ]);
   });
 
   it("starts the SSH gateway and tunnel before Claw3D", async () => {
@@ -149,7 +186,7 @@ describe("startOfficeStack", () => {
     });
     expect(calls).toEqual([
       "prepareGateway:research",
-      "startGateway:research",
+      "startGatewayWithReadiness:research",
       "startClaw3dAll",
       "waitForClaw3dReady",
       "stopClaw3dAll",

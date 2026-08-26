@@ -1,12 +1,22 @@
 import type { ConnectionConfig, SshConnectionConfig } from "./config";
 
 type StartResult = { success: boolean; error?: string };
+type GatewayReadinessResult = StartResult & {
+  running: boolean;
+  ready?: boolean;
+};
+type PreparedGateway = {
+  readonly key: string;
+  readonly port: number;
+};
 
 export interface OfficeStartDependencies {
   getConnectionConfig: () => ConnectionConfig;
-  isGatewayRunning: (profile?: string) => boolean;
-  prepareGateway: (profile?: string) => Promise<unknown>;
-  startGateway: (profile?: string) => boolean;
+  prepareGateway: (profile?: string) => Promise<PreparedGateway>;
+  startGatewayWithReadiness: (
+    profile: string | undefined,
+    prepared: PreparedGateway,
+  ) => Promise<GatewayReadinessResult>;
   sshGatewayStatus: (config: SshConnectionConfig) => Promise<boolean>;
   sshStartGateway: (config: SshConnectionConfig) => Promise<void>;
   startSshTunnel: (config: SshConnectionConfig) => Promise<void>;
@@ -37,9 +47,17 @@ export async function startOfficeStack(
       await deps.startSshTunnel(conn.ssh);
       sshTunnelStarted = true;
       deps.setSshRemoteApiKey(await deps.sshReadRemoteApiKey(conn.ssh));
-    } else if (conn.mode === "local" && !deps.isGatewayRunning(profile)) {
-      await deps.prepareGateway(profile);
-      deps.startGateway(profile);
+    } else if (conn.mode === "local") {
+      const prepared = await deps.prepareGateway(profile);
+      const gateway = await deps.startGatewayWithReadiness(profile, prepared);
+      if (gateway.ready !== true) {
+        return {
+          success: false,
+          error:
+            gateway.error ??
+            "The local gateway did not become ready. Check Gateway logs and try again.",
+        };
+      }
     }
 
     const result = deps.startClaw3dAll();

@@ -1,7 +1,7 @@
 // @vitest-environment node
 
 import { EventEmitter } from "node:events";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import type { ChildProcess } from "node:child_process";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 
@@ -13,6 +13,8 @@ const {
   terminateRef,
   terminatePidRef,
   pidAliveRef,
+  fakeAlivePids,
+  processEvidenceRef,
   apiKeyRef,
   agentDestroyCalls,
   agentInstances,
@@ -43,6 +45,13 @@ const {
   pidAliveRef: {
     value: vi.fn((..._args: unknown[]) => false),
   },
+  fakeAlivePids: { value: new Set<number>() as Set<number> },
+  processEvidenceRef: {
+    value: vi.fn((pid: number) => ({
+      identity: `test-created-${pid}`,
+      image: "python3",
+    })),
+  },
   apiKeyRef: { value: "generated-internal-token" },
   agentInstances: { value: [] as Array<{ destroyed: boolean }> },
 }));
@@ -64,6 +73,7 @@ vi.mock("http", () => {
         statusCode: number;
         destroy: () => void;
         resume: () => void;
+        on: EventEmitter["on"];
       }) => void,
     ) => {
       const req = new EventEmitter() as EventEmitter & {
@@ -71,18 +81,34 @@ vi.mock("http", () => {
         destroy: () => void;
       };
       req.end = () => {
-        queueMicrotask(() =>
-          callback({
-            statusCode:
-              typeof options.headers === "object" &&
-              options.headers !== null &&
-              "Authorization" in options.headers
-                ? 200
-                : 401,
-            destroy: () => {},
-            resume: () => {},
-          }),
-        );
+        queueMicrotask(() => {
+          const response = new EventEmitter() as EventEmitter & {
+            statusCode: number;
+            destroy: () => void;
+            resume: () => void;
+          };
+          response.statusCode =
+            typeof options.headers === "object" &&
+            options.headers !== null &&
+            "Authorization" in options.headers
+              ? 200
+              : 401;
+          response.destroy = () => {};
+          response.resume = () => {};
+          callback(response);
+          queueMicrotask(() => {
+            response.emit(
+              "data",
+              JSON.stringify({
+                features: {
+                  request_tool_policy: true,
+                  request_model_route: true,
+                },
+              }),
+            );
+            response.emit("end");
+          });
+        });
       };
       req.destroy = () => {};
       return req;
@@ -151,6 +177,24 @@ vi.mock("./utils", () => ({
     profile === "default" ? undefined : profile,
   getActiveProfileNameSync: vi.fn(() => undefined),
 }));
+vi.mock("./process-identity", () => ({
+  normalizeProcessImage: (value: unknown) =>
+    typeof value === "string" && value.trim()
+      ? value.trim().replaceAll("\\", "/").split("/").at(-1)!.toLowerCase()
+      : null,
+  processImageMatchesExecutable: (observed: string, expected: string) =>
+    typeof observed === "string" &&
+    typeof expected === "string" &&
+    observed.toLowerCase().replaceAll("\\", "/").split("/").at(-1) ===
+      expected.toLowerCase().replaceAll("\\", "/").split("/").at(-1),
+  processEvidenceMatches: (
+    actual: { identity: string; image: string } | null,
+    expected: { identity: string; image: string } | null,
+  ) =>
+    actual?.identity === expected?.identity &&
+    actual?.image === expected?.image,
+  readProcessIdentityEvidence: (pid: number) => processEvidenceRef.value(pid),
+}));
 vi.mock("./gateway-ports", () => ({
   ensureProfilePortAvailable: vi.fn(async () => 8642),
   getProfilePort: vi.fn(() => 8642),
@@ -171,6 +215,10 @@ vi.mock("./process-tree", () => ({
   terminateProcessTree: (...args: unknown[]) => terminateRef.value(...args),
   terminateProcessTreeByPid: (...args: unknown[]) =>
     terminatePidRef.value(...args),
+  retryCapturedProcessTermination: async () => ({
+    forced: false,
+    remainingPids: [],
+  }),
 }));
 vi.mock("./gateway-managed-config", () => ({
   prepareGatewayManagedConfiguration: vi.fn(async () => ({
@@ -185,6 +233,7 @@ import {
   isGatewayHealthy,
   startGatewayDetailed,
   startGatewayWithRecovery,
+  recoverAeraOwnedGatewaysFromPreviousRun,
   stopAeraOwnedGateways,
   stopGateway,
   stopHealthPolling,
@@ -192,6 +241,7 @@ import {
 import { GatewayProcessOwnershipLedger } from "./gateway-process-ownership";
 
 function fakeChildProcess(pid: number): ChildProcess {
+  fakeAlivePids.value.add(pid);
   const proc = new EventEmitter() as ChildProcess;
   Object.assign(proc, {
     pid,
@@ -203,6 +253,22 @@ function fakeChildProcess(pid: number): ChildProcess {
     stdout: new EventEmitter(),
     stderr: new EventEmitter(),
   });
+  const emit = proc.emit.bind(proc);
+  proc.emit = ((event: string | symbol, ...args: unknown[]) => {
+    if (event === "close") {
+      const [code, signal] = args as [number | null, NodeJS.Signals | null];
+      Object.defineProperty(proc, "exitCode", {
+        configurable: true,
+        value: code,
+      });
+      Object.defineProperty(proc, "signalCode", {
+        configurable: true,
+        value: signal,
+      });
+      fakeAlivePids.value.delete(pid);
+    }
+    return emit(event, ...args);
+  }) as ChildProcess["emit"];
   return proc;
 }
 
@@ -219,7 +285,18 @@ describe("ordinary gateway shutdown lifecycle", () => {
       remainingPids: [],
     });
     pidAliveRef.value.mockReset();
-    pidAliveRef.value.mockReturnValue(false);
+    // Keep the POSIX lifecycle seam deterministic: fake children register
+    // themselves in this set, while arbitrary stale/listener PIDs remain dead
+    // until an individual test opts into them explicitly.
+    fakeAlivePids.value.clear();
+    pidAliveRef.value.mockImplementation(
+      (pid: unknown) => typeof pid === "number" && fakeAlivePids.value.has(pid),
+    );
+    processEvidenceRef.value.mockReset();
+    processEvidenceRef.value.mockImplementation((pid: number) => ({
+      identity: `test-created-${pid}`,
+      image: "python3",
+    }));
     apiKeyRef.value = "generated-internal-token";
     agentDestroyCalls.value = 0;
     agentInstances.value = [];
@@ -242,7 +319,13 @@ describe("ordinary gateway shutdown lifecycle", () => {
     });
 
     const child = fakeChildProcess(process.pid);
-    spawnRef.value.mockReturnValue(child);
+    spawnRef.value.mockImplementation(() => {
+      writeFileSync(
+        `${TEST_HOME}/profiles/recovery/gateway.pid`,
+        JSON.stringify({ pid: process.pid }),
+      );
+      return child;
+    });
     configureGatewayManagedConfiguration({
       modelMutationPort: { mutate: vi.fn() },
     });
@@ -264,7 +347,13 @@ describe("ordinary gateway shutdown lifecycle", () => {
 
   it("serializes concurrent recovery starts for one profile", async () => {
     const child = fakeChildProcess(process.pid);
-    spawnRef.value.mockReturnValue(child);
+    spawnRef.value.mockImplementation(() => {
+      writeFileSync(
+        `${TEST_HOME}/gateway.pid`,
+        JSON.stringify({ pid: process.pid }),
+      );
+      return child;
+    });
     configureGatewayManagedConfiguration({
       modelMutationPort: { mutate: vi.fn() },
     });
@@ -279,7 +368,13 @@ describe("ordinary gateway shutdown lifecycle", () => {
 
   it("uses the freshly prepared credential for the readiness probe", async () => {
     const child = fakeChildProcess(process.pid);
-    spawnRef.value.mockReturnValue(child);
+    spawnRef.value.mockImplementation(() => {
+      writeFileSync(
+        `${TEST_HOME}/gateway.pid`,
+        JSON.stringify({ pid: process.pid }),
+      );
+      return child;
+    });
     apiKeyRef.value = "";
     configureGatewayManagedConfiguration({
       modelMutationPort: { mutate: vi.fn() },
@@ -302,7 +397,13 @@ describe("ordinary gateway shutdown lifecycle", () => {
 
   it("reuses the prepared credential for a later health check", async () => {
     const child = fakeChildProcess(process.pid);
-    spawnRef.value.mockReturnValue(child);
+    spawnRef.value.mockImplementation(() => {
+      writeFileSync(
+        `${TEST_HOME}/gateway.pid`,
+        JSON.stringify({ pid: process.pid }),
+      );
+      return child;
+    });
     apiKeyRef.value = "";
     configureGatewayManagedConfiguration({
       modelMutationPort: { mutate: vi.fn() },
@@ -380,6 +481,7 @@ describe("ordinary gateway shutdown lifecycle", () => {
       child,
       expect.objectContaining({
         detachedProcessGroup: process.platform !== "win32",
+        verifyRootOwnership: expect.any(Function),
       }),
     );
 
@@ -434,6 +536,165 @@ describe("ordinary gateway shutdown lifecycle", () => {
       }),
     );
     expect(listenerAlive).toBe(false);
+    expect(existsSync(`${TEST_HOME}/profiles/research/gateway.pid`)).toBe(
+      false,
+    );
+  });
+
+  it("does not TERM a wrapper after its creation identity or image is reused", () => {
+    const wrapper = fakeChildProcess(process.pid);
+    spawnRef.value.mockReturnValue(wrapper);
+    configureGatewayProcessOwnership(TEST_OWNERSHIP_ROOT);
+    expect(startGatewayDetailed("research").success).toBe(true);
+
+    // The PID is still live, but it now describes a different process. A
+    // ChildProcess handle alone must never authorize a signal.
+    pidAliveRef.value.mockReturnValue(true);
+    processEvidenceRef.value.mockReturnValue({
+      identity: "reused-identity",
+      image: "node",
+    });
+
+    stopGateway("research", true);
+
+    expect(wrapper.kill).not.toHaveBeenCalledWith("SIGTERM");
+    expect(wrapper.kill).not.toHaveBeenCalledWith("SIGKILL");
+  });
+
+  it("refuses app-shutdown signals when durable ownership becomes unavailable", async () => {
+    const processKill = vi.spyOn(process, "kill").mockImplementation(() => true);
+    const wrapper = fakeChildProcess(process.pid);
+    spawnRef.value.mockReturnValue(wrapper);
+    terminateRef.value.mockResolvedValue({
+      forced: false,
+      remainingPids: [],
+    });
+    configureGatewayProcessOwnership(TEST_OWNERSHIP_ROOT);
+    expect(startGatewayDetailed("research").success).toBe(true);
+    mkdirSync(
+      `${TEST_OWNERSHIP_ROOT}/gateway-process-ownership.pending.json`,
+    );
+
+    try {
+      const shutdown = stopAeraOwnedGateways();
+      const observed = shutdown.then(
+        () => null,
+        (error: unknown) => error,
+      );
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(await observed).toEqual(
+        expect.objectContaining({
+          message: expect.stringMatching(/ownership/i),
+        }),
+      );
+
+      expect(terminateRef.value).not.toHaveBeenCalled();
+      expect(terminatePidRef.value).not.toHaveBeenCalled();
+      expect(wrapper.kill).not.toHaveBeenCalled();
+      expect(processKill).not.toHaveBeenCalledWith(
+        process.pid,
+        expect.stringMatching(/^SIG/),
+      );
+    } finally {
+      rmSync(
+        `${TEST_OWNERSHIP_ROOT}/gateway-process-ownership.pending.json`,
+        { recursive: true, force: true },
+      );
+      wrapper.emit("close", 0, null);
+      processKill.mockRestore();
+    }
+  });
+
+  it("removes an exact listener pid marker when cold recovery finds it already dead", () => {
+    const prior = new GatewayProcessOwnershipLedger({
+      userDataPath: TEST_OWNERSHIP_ROOT,
+      desktopPid: process.pid + 1,
+    });
+    const launch = prior.beginLaunch({
+      profileId: "dead-listener",
+      preLaunchPid: null,
+    });
+    prior.markSpawned({
+      profileId: "dead-listener",
+      launchId: launch.launchId,
+      spawnedPid: 9875,
+      spawnedIdentity: "test-created-9875",
+      spawnedImage: "python3",
+    });
+    prior.adoptSpawnedPid({
+      profileId: "dead-listener",
+      launchId: launch.launchId,
+      previousSpawnedPid: 9875,
+      previousSpawnedIdentity: "test-created-9875",
+      previousSpawnedImage: "python3",
+      spawnedPid: 9876,
+      spawnedIdentity: "test-created-9876",
+      spawnedImage: "python3",
+    });
+    mkdirSync(`${TEST_HOME}/profiles/dead-listener`, { recursive: true });
+    const pidPath = `${TEST_HOME}/profiles/dead-listener/gateway.pid`;
+    writeFileSync(pidPath, JSON.stringify({ pid: 9876 }));
+    configureGatewayProcessOwnership(TEST_OWNERSHIP_ROOT);
+    pidAliveRef.value.mockReturnValue(false);
+
+    const result = recoverAeraOwnedGatewaysFromPreviousRun();
+
+    expect(result.ambiguousProfiles).toEqual([]);
+    expect(existsSync(pidPath)).toBe(false);
+    expect(
+      new GatewayProcessOwnershipLedger({
+        userDataPath: TEST_OWNERSHIP_ROOT,
+        desktopPid: process.pid + 2,
+      }).get("dead-listener"),
+    ).toBeNull();
+  });
+
+  it("removes an exact listener pid marker when recovery TERM is followed by exit", () => {
+    const prior = new GatewayProcessOwnershipLedger({
+      userDataPath: TEST_OWNERSHIP_ROOT,
+      desktopPid: process.pid + 1,
+    });
+    const launch = prior.beginLaunch({
+      profileId: "term-listener",
+      preLaunchPid: null,
+    });
+    prior.markSpawned({
+      profileId: "term-listener",
+      launchId: launch.launchId,
+      spawnedPid: 9885,
+      spawnedIdentity: "test-created-9885",
+      spawnedImage: "python3",
+    });
+    prior.adoptSpawnedPid({
+      profileId: "term-listener",
+      launchId: launch.launchId,
+      previousSpawnedPid: 9885,
+      previousSpawnedIdentity: "test-created-9885",
+      previousSpawnedImage: "python3",
+      spawnedPid: 9886,
+      spawnedIdentity: "test-created-9886",
+      spawnedImage: "python3",
+    });
+    mkdirSync(`${TEST_HOME}/profiles/term-listener`, { recursive: true });
+    const pidPath = `${TEST_HOME}/profiles/term-listener/gateway.pid`;
+    writeFileSync(pidPath, JSON.stringify({ pid: 9886 }));
+    configureGatewayProcessOwnership( TEST_OWNERSHIP_ROOT);
+    let alive = true;
+    pidAliveRef.value.mockImplementation((pid: unknown) => pid === 9886 && alive);
+    const processKill = vi.spyOn(process, "kill").mockImplementation(
+      ((pid: number, signal?: NodeJS.Signals | number) => {
+        if (pid === 9886 && signal === "SIGTERM") alive = false;
+        return true;
+      }) as typeof process.kill,
+    );
+
+    try {
+      const result = recoverAeraOwnedGatewaysFromPreviousRun();
+      expect(result.ambiguousProfiles).toEqual([]);
+      expect(existsSync(pidPath)).toBe(false);
+    } finally {
+      processKill.mockRestore();
+    }
   });
 
   // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Port reuse across restarts]]
@@ -476,11 +737,10 @@ describe("ordinary gateway shutdown lifecycle", () => {
     spawnRef.value.mockReturnValue(child);
     const order: string[] = [];
     terminateRef.value.mockImplementation(async () => {
-      order.push(
-        agentInstances.value.some((instance) => instance.destroyed)
-          ? "drained"
-          : "not-drained",
-      );
+      order.push(agentDestroyCalls.value > 0 ? "drained" : "not-drained");
+      // The bounded terminator's successful result means the fake wrapper is
+      // gone even if no real ChildProcess close event is emitted by the seam.
+      child.emit("close", 0, null);
       return { forced: false, remainingPids: [] };
     });
     configureGatewayProcessOwnership(TEST_OWNERSHIP_ROOT);

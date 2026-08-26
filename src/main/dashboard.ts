@@ -16,7 +16,12 @@ import { buildLocalDashboardCliArgs } from "./dashboard-launch";
 import { dashboardWebSocketUrlForRenderer } from "./dashboard-websocket-relay";
 import { ensureLocalDashboardCompatibility } from "./hermes-agent-compat";
 import { HIDDEN_SUBPROCESS_OPTIONS } from "./process-options";
-import { killProcessTree } from "./process-tree";
+import {
+  retryCapturedProcessTermination,
+  terminateProcessTree,
+  type ProcessTreeRetryOwnership,
+  type ProcessTreeTerminationResult,
+} from "./process-tree";
 import { hydrateProfileRuntimeEnv } from "./profile-runtime-env";
 import { isGatewayHealthy, startGatewayWithRecovery } from "./hermes";
 import {
@@ -60,11 +65,68 @@ export interface DashboardStatus {
 interface ManagedDashboard {
   proc: ChildProcess;
   connection: DashboardConnection;
+  retryOwnership?: ProcessTreeRetryOwnership;
 }
 
 const dashboards = new Map<string, ManagedDashboard>();
 const dashboardStarts = new Map<string, Promise<DashboardStatus>>();
 const dashboardStartGenerations = new Map<string, number>();
+const dashboardStopsInFlight = new Map<string, Promise<void>>();
+const dashboardCleanupFailures = new Map<string, string>();
+let dashboardPoolStopping = false;
+let dashboardPoolClosed = false;
+let dashboardPoolShutdown: Promise<void> | null = null;
+const DASHBOARD_START_DRAIN_TIMEOUT_MS = 3_000;
+
+async function waitForDashboardStartDrain(
+  start: Promise<DashboardStatus> | undefined,
+): Promise<void> {
+  if (!start) return;
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, DASHBOARD_START_DRAIN_TIMEOUT_MS);
+    timer.unref?.();
+  });
+  await Promise.race([
+    start.then(
+      () => undefined,
+      () => undefined,
+    ),
+    timeout,
+  ]);
+  if (timer) clearTimeout(timer);
+}
+
+async function terminateDashboardProcess(
+  managed: ManagedDashboard,
+): Promise<void> {
+  const options = {
+    detachedProcessGroup: process.platform !== "win32",
+    forceAfterMs: 3_000,
+    ...(process.platform === "win32"
+      ? {
+          commandTimeoutMs: 3_000,
+          snapshotTimeoutMs: 3_000,
+          snapshotTotalBudgetMs: 6_000,
+        }
+      : {}),
+  };
+  const result: ProcessTreeTerminationResult = managed.retryOwnership
+    ? await retryCapturedProcessTermination(managed.retryOwnership, options)
+    : await terminateProcessTree(managed.proc, options);
+  if (result.retryOwnership) {
+    managed.retryOwnership = result.retryOwnership;
+  }
+  if (result.remainingPids.length > 0) {
+    throw new Error(
+      `Aera Dashboard process tree did not fully exit: ${result.remainingPids.join(",")}`,
+    );
+  }
+  // Do not release the handle until the exact retry has reported no remaining
+  // owned PID.  This is the point at which a later stop may safely forget the
+  // failed Dashboard entry.
+  managed.retryOwnership = undefined;
+}
 
 function resolveProfile(profile?: string): string | undefined {
   return normalizeProfileName(profile ?? getActiveProfileNameSync());
@@ -83,6 +145,14 @@ function supersededDashboardStartStatus(): DashboardStatus {
     supported: true,
     running: false,
     error: "Dashboard start was superseded by a Runtime configuration change.",
+  };
+}
+
+function dashboardPoolUnavailableStatus(): DashboardStatus {
+  return {
+    supported: true,
+    running: false,
+    error: "Aera Dashboard pool is shutting down.",
   };
 }
 
@@ -181,17 +251,29 @@ function getManagedDashboard(profile?: string): ManagedDashboard | undefined {
   // ChildProcess.killed/signalCode describe signal bookkeeping, not reliable
   // OS liveness: Python can still serve an established WebSocket after those
   // fields change. Keep the process managed until the PID is actually gone.
-  if (managed.proc.pid && pidIsAlive(managed.proc.pid)) {
+  if (
+    managed.retryOwnership ||
+    (managed.proc.pid && pidIsAlive(managed.proc.pid))
+  ) {
     return managed;
   }
   dashboards.delete(key);
   return undefined;
 }
 
+function dashboardCleanupFailure(profile?: string): string | undefined {
+  return dashboardCleanupFailures.get(profileKey(profile));
+}
+
+function rememberDashboardCleanupFailure(key: string, error: unknown): void {
+  dashboardCleanupFailures.set(
+    key,
+    error instanceof Error ? error.message : String(error),
+  );
+}
+
 function unsupportedReasonForLocalSpawn(): string | undefined {
-  return getRuntimeInvocation()
-    ? undefined
-    : "Aera Runtime is not prepared.";
+  return getRuntimeInvocation() ? undefined : "Aera Runtime is not prepared.";
 }
 
 function dashboardLogPath(profile: string | undefined): string {
@@ -550,6 +632,16 @@ export async function getDashboardStatus(
     return getRemoteDashboardStatusForConfig(config, profile);
   if (mode === "ssh") return getSshDashboardStatusForConfig(config, profile);
 
+  const cleanupFailure = dashboardCleanupFailure(profile);
+  if (cleanupFailure) {
+    return {
+      supported: true,
+      running: false,
+      error: `Dashboard cleanup is incomplete: ${cleanupFailure}`,
+      logPath: dashboardLogPath(resolveProfile(profile)),
+    };
+  }
+
   const managed = getManagedDashboard(profile);
   if (managed) {
     return {
@@ -613,9 +705,49 @@ export async function startDashboard(
     return getRemoteDashboardStatusForConfig(config, profile);
   if (mode === "ssh") return getSshDashboardStatusForConfig(config, profile);
 
+  // Pool-wide cleanup closes local admission synchronously. A caller that
+  // races App/Profile shutdown must receive a bounded false result rather
+  // than wait for cleanup and then create a brand-new process after the
+  // shutdown barrier has already reported success.
+  if (dashboardPoolClosed || dashboardPoolStopping) {
+    return dashboardPoolUnavailableStatus();
+  }
+
   const key = profileKey(profile);
+  const stopping = dashboardStopsInFlight.get(key);
+  if (stopping) {
+    try {
+      await stopping;
+    } catch (error) {
+      return {
+        supported: true,
+        running: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Dashboard cleanup is still incomplete.",
+      };
+    }
+  }
+  // The per-Profile stop can be joined by a pool shutdown while this caller
+  // is awaiting it. Recheck global admission before publishing a new start;
+  // otherwise an already-admitted caller could resume inside the shutdown
+  // barrier and rely on a later generation race to clean up after it.
+  if (dashboardPoolClosed || dashboardPoolStopping) {
+    return dashboardPoolUnavailableStatus();
+  }
   const pending = dashboardStarts.get(key);
   if (pending) return pending;
+
+  const cleanupFailure = dashboardCleanupFailure(profile);
+  if (cleanupFailure) {
+    return {
+      supported: true,
+      running: false,
+      error: `Dashboard cleanup is incomplete: ${cleanupFailure}`,
+      logPath: dashboardLogPath(resolveProfile(profile)),
+    };
+  }
 
   const existing = getManagedDashboard(profile);
   if (existing) {
@@ -679,15 +811,27 @@ async function startLocalDashboard(
   // primary gateway. Never cold-start one while the gateway itself is still
   // cold-starting: join the readiness-gated recovery path first so the two
   // Python processes never compete (first Windows launch + Defender scan).
-  if (
-    !(await isGatewayHealthy(resolvedProfile)) &&
-    !(await startGatewayWithRecovery(resolvedProfile, 90_000, 500))
-  ) {
-    return {
-      supported: true,
-      running: false,
-      error: "Primary Gateway did not become ready; Dashboard was not started.",
-    };
+  const gatewayHealthy = await isGatewayHealthy(resolvedProfile);
+  if (dashboardStartGeneration(key) !== generation) {
+    return supersededDashboardStartStatus();
+  }
+  if (!gatewayHealthy) {
+    const gatewayRecovered = await startGatewayWithRecovery(
+      resolvedProfile,
+      90_000,
+      500,
+    );
+    if (dashboardStartGeneration(key) !== generation) {
+      return supersededDashboardStartStatus();
+    }
+    if (!gatewayRecovered) {
+      return {
+        supported: true,
+        running: false,
+        error:
+          "Primary Gateway did not become ready; Dashboard was not started.",
+      };
+    }
   }
   const token = randomBytes(24).toString("hex");
   const port = await getFreePort();
@@ -748,10 +892,12 @@ async function startLocalDashboard(
     logPath,
   };
 
-  dashboards.set(key, { proc, connection });
+  const managed = { proc, connection };
+  dashboards.set(key, managed);
   proc.once("exit", () => {
     if (
       dashboards.get(key)?.proc === proc &&
+      !dashboardCleanupFailures.has(key) &&
       (!proc.pid || !pidIsAlive(proc.pid))
     ) {
       dashboards.delete(key);
@@ -765,17 +911,36 @@ async function startLocalDashboard(
     );
     await probeDashboardWebSocket(connection, 5_000);
   } catch (err) {
-    if (dashboards.get(key)?.proc === proc) dashboards.delete(key);
-    killProcessTree(proc, {
-      detachedProcessGroup: process.platform !== "win32",
-      forceAfterMs: 0,
-    });
+    let cleanupError: unknown = null;
+    try {
+      await terminateDashboardProcess(managed);
+      if (dashboards.get(key)?.proc === proc) dashboards.delete(key);
+      dashboardCleanupFailures.delete(key);
+    } catch (error) {
+      cleanupError = error;
+      rememberDashboardCleanupFailure(key, error);
+      // The wrapper/root can emit exit while terminateProcessTree is still
+      // reporting live descendants. Restore its exact process-group handle so
+      // an explicit stop can retry only this owned tree.
+      if (!dashboards.has(key)) dashboards.set(key, managed);
+      console.error(
+        `[dashboard:${key}] process cleanup failed:`,
+        error instanceof Error ? error.message : String(error),
+      );
+    }
     return {
       supported: true,
       running: false,
       logPath,
       error: [
         err instanceof Error ? err.message : String(err),
+        cleanupError
+          ? `cleanup: ${
+              cleanupError instanceof Error
+                ? cleanupError.message
+                : String(cleanupError)
+            }`
+          : "",
         compatWarning ? `compatibility: ${compatWarning}` : "",
       ]
         .filter(Boolean)
@@ -784,36 +949,130 @@ async function startLocalDashboard(
   }
 
   if (dashboardStartGeneration(key) !== generation) {
-    if (dashboards.get(key)?.proc === proc) dashboards.delete(key);
-    killProcessTree(proc, {
-      detachedProcessGroup: process.platform !== "win32",
-      forceAfterMs: 0,
-    });
+    try {
+      await terminateDashboardProcess(managed);
+      if (dashboards.get(key)?.proc === proc) dashboards.delete(key);
+      dashboardCleanupFailures.delete(key);
+    } catch (error) {
+      rememberDashboardCleanupFailure(key, error);
+      if (!dashboards.has(key)) dashboards.set(key, managed);
+      console.error(
+        `[dashboard:${key}] superseded process cleanup failed:`,
+        error instanceof Error ? error.message : String(error),
+      );
+    }
     return supersededDashboardStartStatus();
   }
 
   return { supported: true, running: true, connection, logPath };
 }
 
-export function stopDashboard(profile?: string): boolean {
+export async function stopDashboard(profile?: string): Promise<boolean> {
   const key = profileKey(profile);
+  const existingStop = dashboardStopsInFlight.get(key);
+  if (existingStop) {
+    await existingStop;
+    return true;
+  }
+
+  const pendingStart = dashboardStarts.get(key);
   dashboardStartGenerations.set(key, dashboardStartGeneration(key) + 1);
   dashboardStarts.delete(key);
   const managed = dashboards.get(key);
-  if (!managed) return true;
-  dashboards.delete(key);
-  killProcessTree(managed.proc, {
-    detachedProcessGroup: process.platform !== "win32",
-    forceAfterMs: 0,
-  });
-  return true;
+  const stopping = (async (): Promise<void> => {
+    let cleanupError: unknown = null;
+    if (managed) {
+      dashboards.delete(key);
+      try {
+        await terminateDashboardProcess(managed);
+      } catch (error) {
+        cleanupError = error;
+      }
+    }
+
+    // A start can be waiting before it has published a ChildProcess. Await
+    // its bounded continuation so shutdown cannot report success while the
+    // continuation can still publish a late process.
+    await waitForDashboardStartDrain(pendingStart);
+
+    // If the start crossed the spawn boundary after our first snapshot, clean
+    // that exact late child as well. Starts are serialized behind this map,
+    // so this cannot accidentally take ownership from a newer generation.
+    const late = dashboards.get(key);
+    if (late && late !== managed) {
+      dashboards.delete(key);
+      try {
+        await terminateDashboardProcess(late);
+      } catch (error) {
+        cleanupError ??= error;
+      }
+    }
+
+    if (cleanupError !== null) {
+      // Preserve exact ownership for an explicit, bounded retry.
+      if (!dashboards.has(key)) {
+        if (late) dashboards.set(key, late);
+        else if (managed) dashboards.set(key, managed);
+      }
+      rememberDashboardCleanupFailure(key, cleanupError);
+      throw cleanupError;
+    }
+    dashboardCleanupFailures.delete(key);
+  })();
+  dashboardStopsInFlight.set(key, stopping);
+  try {
+    await stopping;
+    return true;
+  } finally {
+    if (dashboardStopsInFlight.get(key) === stopping) {
+      dashboardStopsInFlight.delete(key);
+    }
+  }
 }
 
-export function stopAllDashboards(): void {
-  for (const key of new Set([
-    ...dashboards.keys(),
-    ...dashboardStarts.keys(),
-  ])) {
-    stopDashboard(key === "default" ? undefined : key);
+export async function stopAllDashboards(
+  options: { closePool?: boolean } = {},
+): Promise<void> {
+  if (options.closePool) dashboardPoolClosed = true;
+  if (dashboardPoolShutdown) {
+    await dashboardPoolShutdown;
+    return;
+  }
+
+  // Close admission before taking the first snapshot. In-flight starts are
+  // still drained by stopDashboard, while every new caller is rejected until
+  // the fixed-point ownership drain has completed.
+  dashboardPoolStopping = true;
+  const shutdown = (async (): Promise<void> => {
+    for (;;) {
+      const keys = [
+        ...new Set([
+          ...dashboards.keys(),
+          ...dashboardStarts.keys(),
+          ...dashboardStopsInFlight.keys(),
+        ]),
+      ];
+      if (keys.length === 0) return;
+
+      const results = await Promise.allSettled(
+        // `keys` are already canonical storage keys. Passing `undefined` for
+        // the default key would resolve it through the mutable active Profile
+        // and can stop the wrong Dashboard (or leave the default forever).
+        keys.map((key) => stopDashboard(key)),
+      );
+      const errors = results.flatMap((result) =>
+        result.status === "rejected" ? [result.reason] : [],
+      );
+      if (errors.length > 0) {
+        throw new AggregateError(errors, "Aera Dashboard cleanup failed.");
+      }
+    }
+  })();
+  dashboardPoolShutdown = shutdown;
+  try {
+    await shutdown;
+  } finally {
+    if (dashboardPoolShutdown === shutdown) dashboardPoolShutdown = null;
+    if (!dashboardPoolClosed) dashboardPoolStopping = false;
   }
 }

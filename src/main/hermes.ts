@@ -44,6 +44,13 @@ import {
   normalizeProfileName,
   getActiveProfileNameSync,
 } from "./utils";
+import {
+  normalizeProcessImage,
+  processImageMatchesExecutable,
+  processEvidenceMatches,
+  readProcessIdentityEvidence,
+  type ProcessIdentityEvidence,
+} from "./process-identity";
 import { getProfilePort, isLoopbackPortReleased } from "./gateway-ports";
 import {
   prepareGatewayManagedConfiguration,
@@ -56,8 +63,10 @@ import { readModels } from "./models";
 import { providerListSafe } from "./secrets";
 import { HIDDEN_SUBPROCESS_OPTIONS } from "./process-options";
 import {
+  retryCapturedProcessTermination,
   terminateProcessTree,
   terminateProcessTreeByPid,
+  type ProcessTreeRetryOwnership,
   type ProcessTreeTerminationResult,
 } from "./process-tree";
 import { type Attachment, escapeXmlAttr } from "../shared/attachments";
@@ -146,7 +155,7 @@ export async function prepareGatewayForLaunch(
   // it as "use the active Profile". That can prepare a credential for the
   // active account space while the caller starts the default Agent Profile.
   const targetProfile =
-    profile === undefined ? resolveProfile(undefined) ?? "default" : profile;
+    profile === undefined ? (resolveProfile(undefined) ?? "default") : profile;
   const prepared = await prepareGatewayManagedConfiguration(
     targetProfile,
     gatewayManagedConfigurationDependencies,
@@ -640,6 +649,13 @@ export interface TuiGatewayClientDependencies {
       forceAfterMs: number;
     },
   ) => Promise<ProcessTreeTerminationResult>;
+  retryCapturedProcessTermination?: (
+    ownership: ProcessTreeRetryOwnership,
+    options: {
+      detachedProcessGroup: boolean;
+      forceAfterMs: number;
+    },
+  ) => Promise<ProcessTreeTerminationResult>;
 }
 
 const defaultTuiGatewayClientDependencies: TuiGatewayClientDependencies = {
@@ -647,6 +663,7 @@ const defaultTuiGatewayClientDependencies: TuiGatewayClientDependencies = {
   spawnBackend: spawn,
   waitForDashboardReady,
   terminateProcessTree,
+  retryCapturedProcessTermination,
 };
 
 class TuiGatewayStoppedError extends Error {
@@ -656,12 +673,45 @@ class TuiGatewayStoppedError extends Error {
   }
 }
 
+const TUI_STARTUP_DRAIN_TIMEOUT_MS = 3_000;
+
+/**
+ * A stop must observe the complete startup continuation, but a third-party
+ * readiness implementation can fail to notice that its child was terminated.
+ * Keep the drain bounded so Electron quit cannot inherit an unbounded network
+ * wait; generation checks and the late-child pass still own anything that
+ * appears after this bound.
+ */
+async function waitForTuiStartupDrain(
+  startupTask: Promise<void> | null,
+): Promise<void> {
+  if (!startupTask) return;
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, TUI_STARTUP_DRAIN_TIMEOUT_MS);
+    timer.unref?.();
+  });
+  await Promise.race([startupTask.catch(() => undefined), timeout]);
+  if (timer) clearTimeout(timer);
+}
+
 let tuiGatewayPoolClosed = false;
 let tuiGatewayPoolStopping = false;
 let tuiGatewayShutdownRequests = 0;
 let tuiGatewayShutdownQueue: Promise<void> = Promise.resolve();
 const tuiGatewayStopsInFlight = new Set<Promise<void>>();
 const tuiGatewayFailedClientKeys = new Set<string>();
+
+function maybeReopenTuiGatewayPool(): void {
+  if (
+    tuiGatewayShutdownRequests === 0 &&
+    !tuiGatewayPoolClosed &&
+    tuiGatewayFailedClientKeys.size === 0 &&
+    tuiGatewayClients.size === 0
+  ) {
+    tuiGatewayPoolStopping = false;
+  }
+}
 
 function assertTuiGatewayPoolAdmissionOpen(): void {
   if (
@@ -714,6 +764,18 @@ export class TuiGatewayClient {
   private ready: Promise<void> | null = null;
   private readyReject: ((error: Error) => void) | null = null;
   private readyResolve: (() => void) | null = null;
+  /**
+   * The complete backend startup continuation.  Keeping this separate from
+   * `ready` is important: `ready` is rejected as soon as shutdown begins,
+   * while the async continuation may still be between port selection,
+   * process spawn, readiness polling, and WebSocket setup.
+   */
+  private startupTask: Promise<void> | null = null;
+  /** Exact identity-bound ownership handles retained when a stop leaves one
+   * or more reparented Windows descendants alive. A single cleanup attempt can
+   * produce independent handles for the old retry tree and a newly published
+   * explicit child; dropping either handle would orphan that tree. */
+  private retryOwnerships: ProcessTreeRetryOwnership[] = [];
   private stopPromise: Promise<void> | null = null;
   private ws: WebSocket | null = null;
 
@@ -791,7 +853,7 @@ export class TuiGatewayClient {
     }
     assertTuiGatewayPoolAdmissionOpen();
     if (this.ready) return this.ready;
-    if (this.proc) {
+    if (this.proc || this.retryOwnerships.length > 0) {
       throw new TuiGatewayStoppedError(
         "Aera Runtime dashboard gateway cleanup is incomplete",
       );
@@ -804,7 +866,9 @@ export class TuiGatewayClient {
     });
     this.ready = ready;
 
-    void this.startDashboardBackend(generation)
+    const startupTask = this.startDashboardBackend(generation);
+    this.startupTask = startupTask;
+    void startupTask
       .then(() => {
         if (this.generation === generation && this.ready === ready) {
           this.readyResolve?.();
@@ -823,6 +887,11 @@ export class TuiGatewayClient {
               : String(cleanupError),
           );
         });
+      })
+      .finally(() => {
+        if (this.startupTask === startupTask) {
+          this.startupTask = null;
+        }
       });
 
     return ready;
@@ -833,16 +902,52 @@ export class TuiGatewayClient {
 
     ++this.generation;
     const proc = this.proc;
+    const startupTask = this.startupTask;
     const readyReject = this.readyReject;
     this.rejectPending(reason);
     this.resetTransportState();
     readyReject?.(reason);
 
-    const stopping = this.terminateOwnedProcess(proc);
+    const stopping = (async (): Promise<void> => {
+      let terminationError: unknown = null;
+      try {
+        await this.terminateOwnedProcess(proc);
+      } catch (error) {
+        terminationError = error;
+      }
+
+      // The process can be assigned after stop() snapshots `this.proc` (for
+      // example, while startDashboardBackend is resuming from port selection).
+      // When the first exact-tree termination succeeds, drain the startup
+      // continuation before declaring the client stopped, then make one more
+      // exact-child cleanup attempt for anything it published during that
+      // continuation.  If termination itself failed, return that bounded
+      // ownership failure promptly; the invalidated continuation is detached
+      // (with its rejection already observed by start()) and a later stop()
+      // retry owns the exact child without waiting on a readiness promise that
+      // may never receive a process-exit event.
+      if (terminationError === null) {
+        await waitForTuiStartupDrain(startupTask);
+      } else if (this.startupTask === startupTask) {
+        this.startupTask = null;
+      }
+      const lateProc = this.proc;
+      if (lateProc && lateProc !== proc) {
+        try {
+          await this.terminateOwnedProcess(lateProc);
+        } catch (error) {
+          terminationError ??= error;
+        }
+      }
+
+      if (terminationError !== null) throw terminationError;
+    })();
     this.stopPromise = stopping;
     try {
       await stopping;
-      if (this.proc === proc) this.proc = null;
+      if (this.proc === proc || (proc === null && this.proc !== null)) {
+        this.proc = null;
+      }
     } finally {
       if (this.stopPromise === stopping) this.stopPromise = null;
     }
@@ -893,7 +998,15 @@ export class TuiGatewayClient {
     });
     this.proc = proc;
     if (this.generation !== generation) {
-      await this.stop();
+      // A concurrent stop() may have taken its snapshot before this spawn
+      // completed.  Do not call stop() recursively here: stop() is waiting
+      // for this startup task and that would deadlock.  Its post-startup
+      // exact-child pass will normally own this process; if no stop is in
+      // flight (for example closeAdmission() alone), clean it up here.
+      if (this.stopPromise === null) {
+        await this.terminateOwnedProcess(proc);
+        if (this.proc === proc) this.proc = null;
+      }
       throw new TuiGatewayStoppedError();
     }
 
@@ -1020,16 +1133,83 @@ export class TuiGatewayClient {
   private async terminateOwnedProcess(
     proc: ChildProcess | null,
   ): Promise<void> {
-    if (!proc) return;
-    const result = await this.dependencies.terminateProcessTree(proc, {
+    if (!proc && this.retryOwnerships.length === 0) return;
+    const options = {
       detachedProcessGroup: process.platform !== "win32",
       forceAfterMs: 3_000,
-    });
-    if (result.remainingPids.length > 0) {
+    };
+    const retryOwnerships = [...this.retryOwnerships];
+    let explicitResult: ProcessTreeTerminationResult | null = null;
+    let firstError: unknown = null;
+
+    // A prior Windows cleanup can retain reparented descendants while a
+    // startup continuation publishes a new explicit ChildProcess.  These are
+    // independent identity-bound targets: always make both bounded attempts
+    // instead of letting the retry handle hide the explicit process.
+    const retryResults: Array<{
+      ownership: ProcessTreeRetryOwnership;
+      result: ProcessTreeTerminationResult | null;
+    }> = [];
+    for (const retryOwnership of retryOwnerships) {
+      try {
+        const retryResult = await (
+          this.dependencies.retryCapturedProcessTermination ??
+          retryCapturedProcessTermination
+        )(retryOwnership, options);
+        retryResults.push({ ownership: retryOwnership, result: retryResult });
+      } catch (error) {
+        retryResults.push({ ownership: retryOwnership, result: null });
+        firstError ??= error;
+      }
+    }
+    if (proc !== null) {
+      try {
+        explicitResult = await this.dependencies.terminateProcessTree(
+          proc,
+          options,
+        );
+      } catch (error) {
+        firstError ??= error;
+      }
+    }
+
+    const remainingPids = [
+      ...retryResults.flatMap(({ result }) => result?.remainingPids ?? []),
+      ...(explicitResult?.remainingPids ?? []),
+    ];
+    // A rejected retry probe is itself an ownership ambiguity: it does not
+    // prove that the previously captured descendants exited or that their
+    // identities changed. Keep the opaque handle so a later bounded stop can
+    // retry the exact evidence rather than silently dropping a live Runtime.
+    const nextRetryOwnerships: ProcessTreeRetryOwnership[] = [];
+    for (const { ownership, result } of retryResults) {
+      if (result === null) {
+        // A rejected evidence probe is ambiguous; retain the exact handle for
+        // a later bounded retry instead of treating the tree as gone.
+        nextRetryOwnerships.push(ownership);
+      } else if (result.remainingPids.length > 0) {
+        nextRetryOwnerships.push(result.retryOwnership ?? ownership);
+      }
+    }
+    if ((explicitResult?.remainingPids.length ?? 0) > 0) {
+      const explicitOwnership = explicitResult?.retryOwnership;
+      if (explicitOwnership && !nextRetryOwnerships.includes(explicitOwnership)) {
+        nextRetryOwnerships.push(explicitOwnership);
+      }
+    }
+    this.retryOwnerships = nextRetryOwnerships;
+
+    if (firstError !== null) throw firstError;
+    if (remainingPids.length > 0) {
       throw new Error(
-        `Runtime process tree did not fully exit: ${result.remainingPids.join(",")}`,
+        `Runtime process tree did not fully exit: ${[
+          ...new Set(remainingPids),
+        ].join(",")}`,
       );
     }
+    // Only release identity-bound ownership after the retry reports a fully
+    // drained tree.  A later stop must be able to retry the same descendants.
+    this.retryOwnerships = [];
   }
 
   private resetTransportState(): void {
@@ -1214,6 +1394,7 @@ export async function retireTuiGatewayClient(profile?: string): Promise<void> {
     if (tuiGatewayClients.get(key) === client) {
       tuiGatewayClients.delete(key);
     }
+    maybeReopenTuiGatewayPool();
   } catch (error) {
     tuiGatewayFailedClientKeys.add(key);
     console.error(
@@ -1272,14 +1453,7 @@ export async function stopAllTuiGatewayClients(
   });
   const settled = shutdown.finally(() => {
     tuiGatewayShutdownRequests -= 1;
-    if (
-      tuiGatewayShutdownRequests === 0 &&
-      !tuiGatewayPoolClosed &&
-      tuiGatewayFailedClientKeys.size === 0 &&
-      tuiGatewayClients.size === 0
-    ) {
-      tuiGatewayPoolStopping = false;
-    }
+    maybeReopenTuiGatewayPool();
   });
   tuiGatewayShutdownQueue = settled.catch(() => undefined);
   await settled;
@@ -1314,10 +1488,7 @@ type GatewayConnectionAgents = {
   https?: https.Agent;
 };
 
-const gatewayConnectionAgents = new Map<
-  string,
-  GatewayConnectionAgents
->();
+const gatewayConnectionAgents = new Map<string, GatewayConnectionAgents>();
 
 function gatewayAgentFor(
   url: string,
@@ -1389,9 +1560,7 @@ function isApiServerReady(
         local && Number.isInteger(preparedApiServerPort)
           ? `http://127.0.0.1:${preparedApiServerPort}`
           : getApiUrl(resolved);
-      const url = `${baseUrl}${
-        local ? "/v1/capabilities" : "/health"
-      }`;
+      const url = `${baseUrl}${local ? "/v1/capabilities" : "/health"}`;
       const mod = url.startsWith("https") ? https : http;
       const req = mod.request(
         url,
@@ -1434,28 +1603,6 @@ function isApiServerReady(
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function waitForApiServerReady(
-  timeoutMs = 8000,
-  profile?: string,
-  pollMs = 250,
-  preparedApiServerKey?: string,
-  preparedApiServerPort?: number,
-): Promise<boolean> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (
-      await isApiServerReady(
-        profile,
-        preparedApiServerKey,
-        preparedApiServerPort,
-      )
-    )
-      return true;
-    await delay(pollMs);
-  }
-  return false;
 }
 
 // ────────────────────────────────────────────────────
@@ -3403,17 +3550,16 @@ export type ChatErrorRecoveryAction =
 export function classifyChatErrorRecovery(
   error: string,
 ): ChatErrorRecoveryAction {
-  if (/(^|[^a-z0-9_])provider_authentication_rejected([^a-z0-9_]|$)/i.test(error)) {
+  if (
+    /(^|[^a-z0-9_])provider_authentication_rejected([^a-z0-9_]|$)/i.test(error)
+  ) {
     return "report_only";
   }
   if (isLocalApiTransportError(error)) return "retry_transport";
   return "restart_gateway";
 }
 
-function formatApiErrorResponse(
-  statusCode: number,
-  rawBody: string,
-): string {
+function formatApiErrorResponse(statusCode: number, rawBody: string): string {
   try {
     const parsed = JSON.parse(rawBody) as Record<string, unknown>;
     const error =
@@ -3425,9 +3571,7 @@ function formatApiErrorResponse(
         ? error.message
         : `API error ${statusCode}`;
     const code =
-      error?.code === "provider_authentication_rejected"
-        ? error.code
-        : null;
+      error?.code === "provider_authentication_rejected" ? error.code : null;
     return code ? `${code}: ${message}` : message;
   } catch {
     return rawBody
@@ -3916,7 +4060,10 @@ const gatewayOwnershipTerminationTimers = new Map<
 // `hermes gateway` starts a short-lived CLI wrapper which writes gateway.pid
 // from the long-lived Python listener. Keep a small adoption window so the
 // durable ownership record follows that listener PID before the wrapper exits.
-const gatewayPidAdoptionTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const gatewayPidAdoptionTimers = new Map<
+  string,
+  ReturnType<typeof setTimeout>
+>();
 let gatewayProcessOwnership: GatewayProcessOwnershipLedger | null = null;
 
 export function configureGatewayProcessOwnership(userDataPath: string): void {
@@ -4099,6 +4246,13 @@ export function startGatewayDetailed(
      * operation (readiness, cleanup) captures the reference here.
      */
     onSpawn?: (proc: ChildProcess) => void;
+    /**
+     * Readiness-gated callers perform the listener adoption themselves after
+     * the authenticated probe.  Suppress the background adoption probe for
+     * that launch so it cannot race/consume the same cold-start readiness
+     * budget (or adopt a PID before the gate has established API health).
+     */
+    schedulePidAdoption?: boolean;
   },
 ): GatewayStartResult {
   // Defensive: the local gateway is never the right thing to spawn in
@@ -4116,6 +4270,15 @@ export function startGatewayDetailed(
     return { success: false, running: false, error };
   }
   ensureInitialized();
+  const ownershipLoadIssue = gatewayProcessOwnership?.getLoadIssue() ?? null;
+  if (gatewayProcessOwnership === null || ownershipLoadIssue !== null) {
+    const error =
+      ownershipLoadIssue === null
+        ? "Aera gateway ownership is unavailable."
+        : `Aera gateway ownership is unavailable: ${ownershipLoadIssue}.`;
+    console.error(`[gateway:${profileKey(profile)}] ${error}`);
+    return { success: false, running: false, error };
+  }
   if (isGatewayRunning(profile)) {
     return {
       success: true,
@@ -4182,6 +4345,7 @@ export function startGatewayDetailed(
   const cliArgs = gatewayCliCommandArgs(profile, ["gateway"]);
   let proc: ChildProcess | null = null;
   let ownership: GatewayLaunchOwnershipRecord | null = null;
+  let spawnedEvidence: ProcessIdentityEvidence | null = null;
   let spawnArgs: string[] | undefined;
   try {
     if (gatewayProcessOwnership === null) {
@@ -4202,15 +4366,23 @@ export function startGatewayDetailed(
     if (typeof proc.pid !== "number") {
       throw new Error("The gateway process identity is unavailable.");
     }
-    gatewayProcessOwnership.markSpawned({
+    spawnedEvidence = readGatewayProcessEvidence(proc.pid);
+    ownership = gatewayProcessOwnership.markSpawned({
       profileId: key,
       launchId: ownership.launchId,
       spawnedPid: proc.pid,
+      spawnedIdentity: spawnedEvidence?.identity,
+      spawnedImage: spawnedEvidence?.image,
     });
     options?.onSpawn?.(proc);
   } catch (err) {
     if (ownership !== null && proc !== null && typeof proc.pid === "number") {
-      retainFailedSpawnOwnershipUntilExit(profile, proc, ownership);
+      retainFailedSpawnOwnershipUntilExit(
+        profile,
+        proc,
+        ownership,
+        spawnedEvidence,
+      );
     } else if (ownership !== null) {
       try {
         gatewayProcessOwnership?.clearLaunch(key, ownership.launchId);
@@ -4218,11 +4390,13 @@ export function startGatewayDetailed(
         // Preserve the bounded launch failure.
       }
     } else if (proc !== null) {
-      try {
-        proc.kill("SIGTERM");
-      } catch {
-        // best-effort cleanup after ownership persistence failure
-      }
+      // Without a durable ownership record there is no identity-bound target
+      // to signal. A ChildProcess handle alone is not sufficient protection
+      // against PID reuse, so leave the process for the explicit recovery
+      // path rather than issuing an unverified TERM.
+      console.warn(
+        `[gateway:${key}] Refusing to signal a process whose ownership could not be recorded.`,
+      );
     }
     if (stderrFd >= 0) {
       try {
@@ -4265,11 +4439,10 @@ export function startGatewayDetailed(
     if (gatewayProcesses.get(key) === proc) gatewayProcesses.delete(key);
     appStartedProfiles.delete(key);
     if (ownership !== null) {
-      try {
-        gatewayProcessOwnership?.clearLaunch(key, ownership.launchId);
-      } catch {
-        // A later cold start will reconcile the durable intent.
-      }
+      // A wrapper error does not prove that a daemonized listener is gone.
+      // Reconcile against the latest durable record and retain any adopted
+      // listener; only a fully dead, identity-verified launch may be cleared.
+      reconcileCompletedGatewayOwnership(profile, ownership);
     }
     invalidateApiCacheFor(profile);
     preparedGatewayKeys.delete(key);
@@ -4284,7 +4457,9 @@ export function startGatewayDetailed(
     }
     if (gatewayProcesses.get(key) === proc) gatewayProcesses.delete(key);
     appStartedProfiles.delete(key);
-    reconcileCompletedGatewayOwnership(profile, ownership);
+    reconcileCompletedGatewayOwnership(profile, ownership, {
+      wrapperExitedCleanly: code === 0 && signal === null,
+    });
     invalidateApiCacheFor(profile);
     preparedGatewayKeys.delete(key);
     // Restart health polling to detect if gateway comes back
@@ -4294,7 +4469,12 @@ export function startGatewayDetailed(
   proc.unref();
   gatewayProcesses.set(key, proc);
   appStartedProfiles.add(key);
-  if (ownership !== null) scheduleGatewayPidAdoption(profile, ownership);
+  if (ownership !== null && options?.schedulePidAdoption !== false) {
+    scheduleGatewayPidAdoption(profile, ownership, {
+      apiServerKey: prepared?.key,
+      apiServerPort: prepared?.port,
+    });
+  }
   // The dashboard backend is intentionally NOT warmed here: it shares this
   // Runtime's Python interpreter, and cold-starting both processes together
   // (first Windows launch + Defender scan) starves the primary gateway so it
@@ -4333,6 +4513,56 @@ export function startGateway(profile?: string): boolean {
 
 const DEFAULT_GATEWAY_READY_TIMEOUT_MS = 90_000;
 const GATEWAY_STDERR_TAIL_BYTES = 4096;
+
+/**
+ * Read creation identity and executable image for one Gateway PID.  The
+ * process table is an advisory source, so malformed/unavailable evidence is
+ * represented as null and every caller must fail closed.  Readiness callers
+ * additionally require a Python image; spawn bookkeeping may retain any
+ * observed image so a later ownership check can reject a mismatched process.
+ */
+function readGatewayProcessEvidence(
+  pid: number,
+): ProcessIdentityEvidence | null {
+  try {
+    const evidence = readProcessIdentityEvidence(pid);
+    if (!evidence) return null;
+    const identity = evidence.identity.trim();
+    const image = normalizeProcessImage(evidence.image);
+    if (!identity || !image) return null;
+    return { identity, image };
+  } catch {
+    return null;
+  }
+}
+
+function isGatewayProcessEvidence(
+  evidence: ProcessIdentityEvidence | null,
+): evidence is ProcessIdentityEvidence {
+  if (!evidence) return false;
+  const invocation = getRuntimeInvocation();
+  if (invocation) {
+    return processImageMatchesExecutable(evidence.image, invocation.python);
+  }
+  const image = normalizeProcessImage(evidence.image);
+  return (
+    image !== null &&
+    GATEWAY_IMAGE_PREFIXES.some((prefix) =>
+      image.startsWith(prefix.toLowerCase()),
+    )
+  );
+}
+
+function gatewayProcessEvidenceStillMatches(
+  pid: number,
+  expected: ProcessIdentityEvidence,
+): boolean {
+  const observed = readGatewayProcessEvidence(pid);
+  return (
+    isGatewayProcessEvidence(observed) &&
+    processEvidenceMatches(observed, expected)
+  );
+}
 
 function gatewayReadinessDiagnostic(
   event: string,
@@ -4397,18 +4627,26 @@ async function waitForGatewayServing(
   preparedApiServerKey?: string,
   preparedApiServerPort?: number,
   preLaunchPid?: number | null,
-): Promise<{ ready: boolean; listenerPid: number | null }> {
+): Promise<{
+  ready: boolean;
+  listenerPid: number | null;
+  listenerEvidence: ProcessIdentityEvidence | null;
+}> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     // A pid file alone is not evidence: the listener PID must parse, differ
     // from the pre-launch stale pid, and resolve to a live Python process.
     const candidate = readPidFile(profile);
-    const listenerPid =
+    const observedListenerEvidence =
       candidate !== null &&
       candidate !== preLaunchPid &&
       pidIsAliveAs(candidate, GATEWAY_IMAGE_PREFIXES)
-        ? candidate
+        ? readGatewayProcessEvidence(candidate)
         : null;
+    const listenerEvidence = isGatewayProcessEvidence(observedListenerEvidence)
+      ? observedListenerEvidence
+      : null;
+    const listenerPid = listenerEvidence === null ? null : candidate;
     if (
       listenerPid !== null &&
       (await isApiServerReady(
@@ -4417,13 +4655,276 @@ async function waitForGatewayServing(
         preparedApiServerPort,
       ))
     ) {
-      return { ready: true, listenerPid };
+      return { ready: true, listenerPid, listenerEvidence };
     }
     if (Date.now() >= deadline) {
-      return { ready: false, listenerPid };
+      return { ready: false, listenerPid, listenerEvidence };
     }
     await delay(pollMs);
   }
+}
+
+type GatewayLaunchCleanupResult = {
+  termination: GatewayStartDiagnostics["termination"];
+  terminated: boolean;
+};
+
+/**
+ * Stop every process identity left by one readiness-gated launch.  The
+ * wrapper is represented by its ChildProcess handle while it lives; a
+ * daemonized listener is represented by the exact PID/evidence observed by
+ * the readiness probe.  Both identities are revalidated immediately before
+ * entering the platform tree terminator, so an adoption/persistence failure
+ * cannot turn a stale PID into a signal target.
+ */
+async function cleanupGatewayLaunch(
+  key: string,
+  profile: string | undefined,
+  launchProc: ChildProcess | null,
+  listenerPid: number | null,
+  listenerEvidence: ProcessIdentityEvidence | null,
+): Promise<GatewayLaunchCleanupResult> {
+  const targets: Array<
+    | { kind: "child"; proc: ChildProcess; evidence: ProcessIdentityEvidence }
+    | { kind: "pid"; pid: number; evidence: ProcessIdentityEvidence }
+  > = [];
+
+  let ownership: GatewayLaunchOwnershipRecord | null = null;
+  let cleanupFailed = false;
+  try {
+    ownership = gatewayProcessOwnership?.get(key) ?? null;
+  } catch {
+    // A persistence/read failure is not an empty ownership ledger. Keep every
+    // live launch identity unresolved and refuse to report a clean stop.
+    cleanupFailed = true;
+  }
+
+  // The listener can publish gateway.pid in the narrow interval after the
+  // final readiness poll has observed no file but before timeout cleanup
+  // starts. Capture and durably adopt that exact PID now; otherwise cleanup
+  // would see only the exited wrapper and leave the daemon behind. Adoption
+  // still requires a live Python image plus creation identity, and a failed
+  // persistence step deliberately leaves the PID unowned/fail-closed.
+  if (
+    !cleanupFailed &&
+    ownership !== null &&
+    ownership.listenerPid === null
+  ) {
+    const latePidEntry = readPidFileEntry(profile);
+    if (
+      latePidEntry !== null &&
+      latePidEntry.pid !== ownership.preLaunchPid
+    ) {
+      const lateEvidence = readGatewayProcessEvidence(latePidEntry.pid);
+      if (isGatewayProcessEvidence(lateEvidence)) {
+        const adopted = adoptGatewayPidFromFile(
+          profile,
+          ownership,
+          lateEvidence,
+        );
+        if (
+          adopted !== null &&
+          adopted.listenerPid === latePidEntry.pid &&
+          adopted.listenerIdentity === lateEvidence.identity &&
+          adopted.listenerImage === lateEvidence.image
+        ) {
+          ownership = adopted;
+          listenerPid = latePidEntry.pid;
+          listenerEvidence = lateEvidence;
+        }
+      }
+    }
+  }
+  const wrapperTargetRecord = ownership ? wrapperTarget(ownership) : null;
+  if (
+    launchProc !== null &&
+    typeof launchProc.pid === "number" &&
+    wrapperTargetRecord !== null &&
+    wrapperTargetRecord.pid === launchProc.pid &&
+    wrapperTargetRecord.identity !== null &&
+    wrapperTargetRecord.image !== null
+  ) {
+    const observed = readGatewayProcessEvidence(launchProc.pid);
+    if (
+      isChildProcessAlive(launchProc) &&
+      processEvidenceMatches(observed, {
+        identity: wrapperTargetRecord.identity,
+        image: wrapperTargetRecord.image,
+      }) &&
+      isGatewayProcessEvidence(observed)
+    ) {
+      targets.push({
+        kind: "child",
+        proc: launchProc,
+        evidence: observed,
+      });
+    }
+  }
+
+  if (
+    listenerPid !== null &&
+    listenerEvidence !== null &&
+    isGatewayProcessEvidence(listenerEvidence) &&
+    listenerPid !== launchProc?.pid
+  ) {
+    const observed = readGatewayProcessEvidence(listenerPid);
+    if (
+      processEvidenceMatches(observed, listenerEvidence) &&
+      isGatewayProcessEvidence(observed)
+    ) {
+      targets.push({ kind: "pid", pid: listenerPid, evidence: observed });
+    }
+  }
+
+  const targetedPids = new Set(
+    targets.flatMap((target) => {
+      const pid = target.kind === "child" ? target.proc.pid : target.pid;
+      return typeof pid === "number" ? [pid] : [];
+    }),
+  );
+  const unresolvedPids: number[] = [];
+  if (
+    launchProc !== null &&
+    typeof launchProc.pid === "number" &&
+    isChildProcessAlive(launchProc) &&
+    !targetedPids.has(launchProc.pid)
+  ) {
+    unresolvedPids.push(launchProc.pid);
+  }
+  const currentPidEntry = readPidFileEntry(profile);
+  if (
+    currentPidEntry !== null &&
+    currentPidEntry.pid !== ownership?.preLaunchPid &&
+    !targetedPids.has(currentPidEntry.pid)
+  ) {
+    const observed = readGatewayProcessEvidence(currentPidEntry.pid);
+    if (
+      observed !== null ||
+      pidIsAliveAs(currentPidEntry.pid, GATEWAY_IMAGE_PREFIXES)
+    ) {
+      // A live PID with missing/mismatched evidence is an ambiguity, not an
+      // exited listener. It stays in diagnostics and is never signalled.
+      unresolvedPids.push(currentPidEntry.pid);
+    }
+  }
+
+  gatewayReadinessDiagnostic("cleanup-plan", {
+    targetCount: targets.length,
+    wrapperPid: launchProc?.pid ?? null,
+    listenerPid,
+  });
+
+  const remainingPids: number[] = [...unresolvedPids];
+  let forced = false;
+  for (const target of targets) {
+    const targetPid = target.kind === "child" ? target.proc.pid : target.pid;
+    gatewayReadinessDiagnostic("cleanup-target-start", {
+      kind: target.kind,
+      pid: targetPid ?? null,
+    });
+    try {
+      const terminationOptions = {
+        detachedProcessGroup:
+          target.kind === "child" && process.platform !== "win32",
+        forceAfterMs: 3_000,
+        verifyRootOwnership: (pid: number) => {
+          if (
+            pid !== targetPid ||
+            !gatewayProcessEvidenceStillMatches(pid, target.evidence)
+          ) {
+            return false;
+          }
+          try {
+            return (
+              ownership !== null &&
+              gatewayProcessOwnership?.get(key)?.launchId ===
+                ownership.launchId &&
+              (target.kind !== "pid" || readPidFile(profile) === pid)
+            );
+          } catch {
+            return false;
+          }
+        },
+        ...(process.platform === "win32"
+          ? {
+              commandTimeoutMs: 3_000,
+              snapshotTimeoutMs: 3_000,
+              snapshotTotalBudgetMs: 6_000,
+              diagnosticProfileKey: key,
+            }
+          : {}),
+      };
+      const result =
+        target.kind === "child"
+          ? await terminateProcessTree(target.proc, terminationOptions)
+          : await terminateProcessTreeByPid(target.pid, terminationOptions);
+      forced ||= result.forced;
+      remainingPids.push(...result.remainingPids);
+      gatewayReadinessDiagnostic("cleanup-target-complete", {
+        kind: target.kind,
+        pid: targetPid ?? null,
+        forced: result.forced,
+        remainingPidCount: result.remainingPids.length,
+      });
+    } catch (cleanupError) {
+      cleanupFailed = true;
+      const stillAlive =
+        typeof targetPid === "number" &&
+        (target.kind === "child"
+          ? isChildProcessAlive(target.proc)
+          : pidIsAliveAs(target.pid, GATEWAY_IMAGE_PREFIXES));
+      if (stillAlive && typeof targetPid === "number") {
+        remainingPids.push(targetPid);
+      }
+      gatewayReadinessDiagnostic("cleanup-target-failed", {
+        kind: target.kind,
+        pid: targetPid ?? null,
+        failure:
+          cleanupError instanceof Error
+            ? cleanupError.name.slice(0, 80)
+            : "unknown",
+      });
+      console.error(
+        `[gateway:${key}] Never-ready gateway cleanup failed:`,
+        cleanupError instanceof Error
+          ? cleanupError.message
+          : String(cleanupError),
+      );
+    }
+  }
+
+  if (!cleanupFailed && remainingPids.length === 0 && ownership !== null) {
+    try {
+      const current = gatewayProcessOwnership?.get(key) ?? null;
+      if (current !== null) {
+        if (current.launchId !== ownership.launchId) {
+          throw new Error("Gateway ownership changed during launch cleanup.");
+        }
+        for (const targetPid of targetedPids) {
+          clearPidFileBestEffort(profile, targetPid);
+        }
+        gatewayProcessOwnership?.clearLaunch(key, ownership.launchId);
+      }
+      cancelGatewayPidAdoption(profile);
+    } catch (cleanupError) {
+      cleanupFailed = true;
+      console.error(
+        `[gateway:${key}] Never-ready gateway ownership release failed:`,
+        cleanupError instanceof Error
+          ? cleanupError.message
+          : String(cleanupError),
+      );
+    }
+  }
+
+  const termination = {
+    forced,
+    remainingPids: [...new Set(remainingPids)],
+  };
+  return {
+    termination,
+    terminated: !cleanupFailed && termination.remainingPids.length === 0,
+  };
 }
 
 /**
@@ -4460,6 +4961,7 @@ export async function startGatewayWithReadiness(
     onSpawn: (proc) => {
       launchRef.proc = proc;
     },
+    schedulePidAdoption: false,
   });
   if (!startResult.success) {
     return { ...startResult, ready: false };
@@ -4493,6 +4995,58 @@ export async function startGatewayWithReadiness(
 
   if (serving.ready) {
     setApiCacheFor(profile, true);
+    // The wrapper PID is only a launch transport.  Once gateway.pid and the
+    // authenticated API identify the long-lived listener, atomically transfer
+    // durable ownership to that listener before warming the dashboard or
+    // returning `ready=true`.
+    if (!startResult.alreadyRunning) {
+      const currentOwnership =
+        gatewayProcessOwnership?.get(profileKey(profile)) ?? null;
+      const adopted = adoptGatewayPidFromFile(
+        profile,
+        currentOwnership,
+        serving.listenerEvidence,
+      );
+      // A serving listener without a durable identity transfer cannot be
+      // safely cleaned up on Electron quit. Treat that as a launch failure;
+      // the timeout cleanup below will still terminate any process we own.
+      if (
+        adopted === null ||
+        adopted.listenerPid !== serving.listenerPid ||
+        adopted.listenerIdentity !== serving.listenerEvidence?.identity ||
+        adopted.listenerImage !== serving.listenerEvidence?.image
+      ) {
+        const key = profileKey(profile);
+        console.error(
+          `[gateway:${key}] Listener became ready but ownership adoption could not be confirmed.`,
+        );
+        const cleanup = await cleanupGatewayLaunch(
+          key,
+          profile,
+          launchRef.proc,
+          serving.listenerPid,
+          serving.listenerEvidence,
+        );
+        return {
+          ...startResult,
+          success: false,
+          running: cleanup.terminated ? false : startResult.running,
+          ready: false,
+          error:
+            "The gateway became ready but its listener ownership could not be recorded.",
+          diagnostics: {
+            ...startResult.diagnostics,
+            pid: serving.listenerPid ?? startResult.diagnostics?.pid,
+            exitCode: launchRef.proc?.exitCode ?? null,
+            signal: launchRef.proc?.signalCode ?? null,
+            stderrTail: readGatewayLogTail(
+              startResult.logPath ?? startResult.diagnostics?.logPath,
+            ),
+            termination: cleanup.termination,
+          },
+        };
+      }
+    }
     (options.warmDashboard ?? warmTuiGatewayClient)(profile);
     // Carry the capabilities document as acceptance evidence. This is
     // evidence, not a gate: older Runtimes legitimately lack these feature
@@ -4515,108 +5069,20 @@ export async function startGatewayWithReadiness(
   }
 
   const key = profileKey(profile);
-  let termination: GatewayStartDiagnostics["termination"];
-  let terminated = false;
-  if (!startResult.alreadyRunning) {
-    // Terminate both identities the launch can leave behind: the wrapper we
-    // spawned (while it is still alive) and the verified listener it may have
-    // published. The listener has no Node ChildProcess handle, so it must use
-    // the PID-specific tree API; casting `{ pid }` to ChildProcess makes the
-    // Windows liveness gate treat it as already exited and silently skip it.
-    const targets: Array<
-      { kind: "child"; proc: ChildProcess } | { kind: "pid"; pid: number }
-    > = [];
-    const launchProc = launchRef.proc;
-    if (
-      launchProc !== null &&
-      typeof launchProc.pid === "number" &&
-      isChildProcessAlive(launchProc)
-    ) {
-      targets.push({ kind: "child", proc: launchProc });
-    }
-    if (
-      serving.listenerPid !== null &&
-      serving.listenerPid !== launchProc?.pid
-    ) {
-      targets.push({ kind: "pid", pid: serving.listenerPid });
-    }
-    gatewayReadinessDiagnostic("cleanup-plan", {
-      targetCount: targets.length,
-      wrapperPid: launchProc?.pid ?? null,
-      listenerPid: serving.listenerPid,
-    });
-    const remainingPids: number[] = [];
-    let forced = false;
-    let cleanupFailed = false;
-    for (const target of targets) {
-      const targetPid =
-        target.kind === "child" ? (target.proc.pid ?? null) : target.pid;
-      gatewayReadinessDiagnostic("cleanup-target-start", {
-        kind: target.kind,
-        pid: targetPid,
-      });
-      try {
-        const terminationOptions = {
-          // Only the wrapper is spawned as a dedicated POSIX process group.
-          // The daemonized listener is an exact PID/tree target.
-          detachedProcessGroup:
-            target.kind === "child" && process.platform !== "win32",
-          forceAfterMs: 3_000,
-          ...(process.platform === "win32"
-            ? {
-                commandTimeoutMs: 3_000,
-                snapshotTimeoutMs: 3_000,
-                snapshotTotalBudgetMs: 6_000,
-                diagnosticProfileKey: key,
-              }
-            : {}),
-        };
-        const result =
-          target.kind === "child"
-            ? await terminateProcessTree(target.proc, terminationOptions)
-            : await terminateProcessTreeByPid(target.pid, terminationOptions);
-        forced ||= result.forced;
-        remainingPids.push(...result.remainingPids);
-        gatewayReadinessDiagnostic("cleanup-target-complete", {
-          kind: target.kind,
-          pid: targetPid,
-          forced: result.forced,
-          remainingPidCount: result.remainingPids.length,
-        });
-      } catch (cleanupError) {
-        cleanupFailed = true;
-        const stillAlive =
-          typeof targetPid === "number" &&
-          (target.kind === "child"
-            ? isChildProcessAlive(target.proc)
-            : pidIsAliveAs(target.pid, GATEWAY_IMAGE_PREFIXES));
-        if (stillAlive && typeof targetPid === "number") {
-          remainingPids.push(targetPid);
-        }
-        gatewayReadinessDiagnostic("cleanup-target-failed", {
-          kind: target.kind,
-          pid: targetPid,
-          failure:
-            cleanupError instanceof Error
-              ? cleanupError.name.slice(0, 80)
-              : "unknown",
-        });
-        console.error(
-          `[gateway:${key}] Never-ready gateway cleanup failed:`,
-          cleanupError instanceof Error
-            ? cleanupError.message
-            : String(cleanupError),
-        );
+  const cleanup = startResult.alreadyRunning
+    ? {
+        termination: undefined,
+        terminated: false,
       }
-    }
-    // Even when the wrapper has already exited and no listener PID was ever
-    // published, record an explicit empty cleanup result. Conversely, a
-    // thrown cleanup operation must never be reported as a clean stop: retain
-    // any still-live target PID in the diagnostics and keep running=true so a
-    // caller cannot mistake an unverified process for a stopped one.
-    termination = { forced, remainingPids: [...new Set(remainingPids)] };
-    terminated = !cleanupFailed && termination.remainingPids.length === 0;
-  }
+    : await cleanupGatewayLaunch(
+        key,
+        profile,
+        launchRef.proc,
+        serving.listenerPid,
+        serving.listenerEvidence,
+      );
+  const termination = cleanup.termination;
+  const terminated = cleanup.terminated;
   const launchProc = launchRef.proc;
   const error =
     `The gateway process launched but its API did not become ready within ${readyTimeoutMs}ms. ` +
@@ -4684,18 +5150,28 @@ function readPidFileEntry(
 function adoptGatewayPidFromFile(
   profile: string | undefined,
   ownership: GatewayLaunchOwnershipRecord | null,
+  listenerEvidence?: ProcessIdentityEvidence | null,
+  options: { replaceExistingListener?: boolean } = {},
 ): GatewayLaunchOwnershipRecord | null {
   if (ownership === null || gatewayProcessOwnership === null) return ownership;
-  const trackedWrapper = gatewayProcesses.get(ownership.profileId) ?? null;
   const pidEntry = readPidFileEntry(profile);
+  if (pidEntry === null || ownership.spawnedPid === null) return ownership;
+  const evidence = listenerEvidence ?? readGatewayProcessEvidence(pidEntry.pid);
+  // A readiness pass may call adoption more than once while the wrapper is
+  // still attached.  Preserve the existing listener evidence when the same
+  // PID is observed again, and never overwrite it with a different identity.
   if (
-    pidEntry === null ||
-    ownership.spawnedPid === null ||
-    (trackedWrapper?.pid === ownership.spawnedPid &&
-      isChildProcessAlive(trackedWrapper)) ||
+    ownership.listenerPid !== null &&
+    (ownership.listenerPid !== pidEntry.pid ||
+      ownership.listenerIdentity !== evidence?.identity ||
+      ownership.listenerImage !== evidence?.image)
+  ) {
+    return ownership;
+  }
+  if (
     pidEntry.pid === ownership.preLaunchPid ||
-    pidEntry.pid === ownership.spawnedPid ||
-    !pidIsAliveAs(pidEntry.pid, GATEWAY_IMAGE_PREFIXES)
+    !pidIsAliveAs(pidEntry.pid, GATEWAY_IMAGE_PREFIXES) ||
+    !isGatewayProcessEvidence(evidence)
   ) {
     return ownership;
   }
@@ -4705,6 +5181,11 @@ function adoptGatewayPidFromFile(
       launchId: ownership.launchId,
       previousSpawnedPid: ownership.spawnedPid,
       spawnedPid: pidEntry.pid,
+      previousSpawnedIdentity: ownership.spawnedIdentity,
+      previousSpawnedImage: ownership.spawnedImage,
+      spawnedIdentity: evidence.identity,
+      spawnedImage: evidence.image,
+      replaceExistingListener: options.replaceExistingListener === true,
     });
   } catch {
     // A concurrent cold-start/restart owns the record now; keep the existing
@@ -4716,23 +5197,70 @@ function adoptGatewayPidFromFile(
 function scheduleGatewayPidAdoption(
   profile: string | undefined,
   ownership: GatewayLaunchOwnershipRecord,
+  options: {
+    apiServerKey?: string;
+    apiServerPort?: number;
+  } = {},
 ): void {
   const key = ownership.profileId;
   const previous = gatewayPidAdoptionTimers.get(key);
   if (previous) clearTimeout(previous);
   const deadline = Date.now() + 5_000;
-  const tick = (): void => {
+  const tick = async (): Promise<void> => {
     gatewayPidAdoptionTimers.delete(key);
     const current = gatewayProcessOwnership?.get(key) ?? null;
     if (current === null || current.launchId !== ownership.launchId) return;
-    const adopted = adoptGatewayPidFromFile(profile, current);
-    if (adopted !== current) return;
+    const pidEntry = readPidFileEntry(profile);
+    const candidateEvidence =
+      pidEntry !== null &&
+      pidEntry.pid !== current.preLaunchPid &&
+      pidIsAliveAs(pidEntry.pid, GATEWAY_IMAGE_PREFIXES)
+        ? readGatewayProcessEvidence(pidEntry.pid)
+        : null;
+    if (!isGatewayProcessEvidence(candidateEvidence)) {
+      if (Date.now() >= deadline) return;
+      const timer = setTimeout(tick, 50);
+      timer.unref?.();
+      gatewayPidAdoptionTimers.set(key, timer);
+      return;
+    }
+    // A gateway.pid appearing is not sufficient to transfer ownership.  A
+    // daemonized wrapper can publish a stale/replacement PID while the API is
+    // still cold; adopting on that observation would let shutdown signal an
+    // unrelated process.  Conversely, an API probe before a verifiable pid
+    // candidate exists cannot prove which listener answered and races the
+    // foreground readiness flow. Require both facts in that order before
+    // accepting a cross-PID listener.
+    let healthy = false;
+    try {
+      healthy = await isApiServerReady(
+        profile,
+        options.apiServerKey ?? preparedGatewayKeys.get(key),
+        options.apiServerPort,
+      );
+    } catch {
+      healthy = false;
+    }
+    const latest = gatewayProcessOwnership?.get(key) ?? null;
+    if (latest === null || latest.launchId !== ownership.launchId) return;
+    const adopted = healthy
+      ? adoptGatewayPidFromFile(profile, latest, candidateEvidence)
+      : latest;
+    if (adopted !== latest) return;
     if (Date.now() >= deadline) return;
     const timer = setTimeout(tick, 50);
     timer.unref?.();
     gatewayPidAdoptionTimers.set(key, timer);
   };
-  tick();
+  void tick().catch(() => {
+    // A transient probe failure leaves the durable wrapper record intact. The
+    // next bounded timer tick retries with the same launch identity.
+    if (Date.now() < deadline) {
+      const timer = setTimeout(() => void tick(), 50);
+      timer.unref?.();
+      gatewayPidAdoptionTimers.set(key, timer);
+    }
+  });
 }
 
 function cancelGatewayPidAdoption(profile: string | undefined): void {
@@ -4744,20 +5272,75 @@ function cancelGatewayPidAdoption(profile: string | undefined): void {
 function reconcileCompletedGatewayOwnership(
   profile: string | undefined,
   ownership: GatewayLaunchOwnershipRecord | null,
+  options: { wrapperExitedCleanly?: boolean } = {},
 ): void {
   if (ownership === null || gatewayProcessOwnership === null) return;
-  const currentPid = readPidFile(profile);
+  let currentOwnership = ownership;
+  try {
+    const latest = gatewayProcessOwnership.get(ownership.profileId);
+    if (latest === null || latest.launchId !== ownership.launchId) return;
+    currentOwnership = latest;
+  } catch {
+    return;
+  }
+  const pidEntry = readPidFileEntry(profile);
+  const trackedProcess = gatewayProcesses.get(ownership.profileId) ?? null;
+  const wrapper = wrapperTarget(currentOwnership);
+  const listener = listenerTarget(currentOwnership, pidEntry);
+  const wrapperStatus = ownedTargetStatus(wrapper, trackedProcess);
+  const listenerStatus = ownedTargetStatus(listener, null);
+  // Unknown identity evidence is not equivalent to a dead process. Retain
+  // the durable record so a later retry/restart can obtain a fresh proof.
+  if (wrapperStatus === "alive" || listenerStatus === "alive") return;
   if (
-    currentPid !== null &&
-    currentPid !== ownership.preLaunchPid &&
-    pidIsAliveAs(currentPid, GATEWAY_IMAGE_PREFIXES)
+    wrapperStatus === "unknown" ||
+    listenerStatus === "unknown" ||
+    wrapperStatus === "mismatch" ||
+    listenerStatus === "mismatch"
+  )
+    return;
+
+  // The CLI wrapper can exit before the daemonized listener has published its
+  // gateway.pid. Keep the launch intent through that bounded hand-off window;
+  // the readiness path (or the adoption timer) will attach the listener's
+  // exact identity instead of allowing the close event to erase ownership.
+  if (
+    options.wrapperExitedCleanly === true &&
+    currentOwnership.listenerPid === null &&
+    readPidFileEntry(profile) === null
+  ) {
+    scheduleGatewayPidAdoption(profile, currentOwnership);
+    return;
+  }
+
+  // A live PID file that is neither the adopted listener nor the exact legacy
+  // same-PID target is a replacement/foreign process. Preserve ownership and
+  // never clear its durable guard automatically.
+  const knownPids = new Set(
+    [wrapper?.pid, listener?.pid].filter(
+      (value): value is number => value !== undefined,
+    ),
+  );
+  if (
+    pidEntry !== null &&
+    pidEntry.pid !== currentOwnership.preLaunchPid &&
+    !knownPids.has(pidEntry.pid) &&
+    pidIsAliveAs(pidEntry.pid, GATEWAY_IMAGE_PREFIXES)
   ) {
     return;
   }
   try {
+    // Remove the exact listener marker before dropping durable ownership. The
+    // daemon PID is normally different from the short-lived wrapper PID, so
+    // clearing only spawnedPid would leave a stale gateway.pid behind.
+    const expectedPid =
+      currentOwnership.listenerPid ?? currentOwnership.spawnedPid;
+    if (expectedPid !== null) {
+      clearPidFileBestEffort(profile, expectedPid);
+    }
     gatewayProcessOwnership.clearLaunch(
-      ownership.profileId,
-      ownership.launchId,
+      currentOwnership.profileId,
+      currentOwnership.launchId,
     );
   } catch {
     // A later cold start will re-evaluate the bounded record.
@@ -4768,10 +5351,17 @@ function retainFailedSpawnOwnershipUntilExit(
   profile: string | undefined,
   proc: ChildProcess,
   ownership: GatewayLaunchOwnershipRecord,
+  spawnedEvidence: ProcessIdentityEvidence | null = null,
 ): void {
   if (typeof proc.pid !== "number") return;
   const key = ownership.profileId;
-  const trackedOwnership = { ...ownership, spawnedPid: proc.pid };
+  const trackedOwnership = {
+    ...ownership,
+    spawnedPid: proc.pid,
+    spawnedIdentity:
+      ownership.spawnedIdentity ?? spawnedEvidence?.identity ?? null,
+    spawnedImage: ownership.spawnedImage ?? spawnedEvidence?.image ?? null,
+  };
   let completed = false;
   const complete = (): void => {
     if (completed) return;
@@ -4791,11 +5381,11 @@ function retainFailedSpawnOwnershipUntilExit(
   });
   gatewayProcesses.set(key, proc);
   appStartedProfiles.add(key);
-  try {
-    proc.kill("SIGTERM");
-  } catch {
-    // The bounded liveness check below decides whether evidence can be cleared.
-  }
+  // A persistence failure still has to obey the same identity gate as every
+  // other TERM/KILL path. If the spawn-time evidence was unavailable, keep the
+  // durable intent ambiguous and let an explicit operator/recovery path decide
+  // what to do; a bare ChildProcess handle is not enough to signal safely.
+  signalOwnedTarget(wrapperTarget(trackedOwnership), proc, "SIGTERM");
   if (!isChildProcessAlive(proc)) {
     complete();
     return;
@@ -4823,12 +5413,30 @@ export function stopGateway(
   if (!shouldForce && !appStartedProfiles.has(key)) return;
   cancelGatewayPidAdoption(profile);
 
+  // A malformed or durably-unpromoted ledger is an authorization failure, not
+  // evidence that the PID is safe to kill.  Keep both the durable file and any
+  // in-memory handle untouched until a later explicit recovery can obtain a
+  // fresh identity/image proof.
+  if (gatewayProcessOwnership?.getLoadIssue() !== null) {
+    console.warn(
+      `[gateway:${key}] Refusing to stop a gateway while ownership state is unavailable.`,
+    );
+    // Drop only the process-manager's in-memory claim.  The OS process and
+    // durable ledger remain untouched; retaining a stale handle in this map
+    // would make a later app-wide shutdown retry an unverified target after a
+    // corrupt ledger has already denied authorization.
+    gatewayProcesses.delete(key);
+    appStartedProfiles.delete(key);
+    stopTuiGatewayClient(profile);
+    return;
+  }
+
   let ownership: GatewayLaunchOwnershipRecord | null = null;
   try {
     ownership = gatewayProcessOwnership?.get(key) ?? null;
-    ownership = adoptGatewayPidFromFile(profile, ownership);
   } catch {
-    // Without valid durable evidence, retain the legacy exact-profile stop.
+    // Without valid durable evidence, retain the durable guard and refuse an
+    // unverified PID stop below.
   }
 
   // Close our sockets while the gateway is still listening. Once it starts
@@ -4836,33 +5444,50 @@ export function stopGateway(
   drainGatewayConnections(profile);
 
   const proc = gatewayProcesses.get(key);
+  const wrapper = ownership === null ? null : wrapperTarget(ownership);
   if (proc && isChildProcessAlive(proc)) {
-    proc.kill("SIGTERM");
+    // Never let a live ChildProcess handle bypass the durable creation/image
+    // proof. A reused PID must be left untouched (and its ownership record
+    // retained for an explicit, better-evidenced recovery decision).
+    if (ownership !== null) {
+      const wrapperStatus = ownedTargetStatus(wrapper, proc);
+      if (wrapperStatus === "alive") {
+        signalOwnedTarget(wrapper, proc, "SIGTERM");
+      } else {
+        // Detach a stale in-memory handle after a failed proof. The durable
+        // record remains as the fail-closed guard and can be reviewed/recovered
+        // later, while subsequent starts must not mistake this handle for a
+        // currently managed Gateway.
+        gatewayProcesses.delete(key);
+        appStartedProfiles.delete(key);
+      }
+    } else {
+      console.warn(
+        `[gateway:${key}] Refusing to stop an unrecorded Gateway process without identity evidence.`,
+      );
+      gatewayProcesses.delete(key);
+      appStartedProfiles.delete(key);
+    }
   }
   const trackedProcessStillAlive = proc ? isChildProcessAlive(proc) : false;
   if (!trackedProcessStillAlive) gatewayProcesses.delete(key);
 
-  const pid = readPidFile(profile);
-  const canSignalPid =
-    ownership === null ||
-    (ownership.spawnedPid !== null &&
-      pid === ownership.spawnedPid &&
-      pid !== ownership.preLaunchPid);
-  if (pid && canSignalPid) {
-    try {
-      process.kill(pid, "SIGTERM");
-    } catch {
-      // already dead
-    }
+  const pidEntry = readPidFileEntry(profile);
+  const listener =
+    ownership === null ? null : listenerTarget(ownership, pidEntry);
+  if (listener !== null && listener.pid !== proc?.pid) {
+    // A synchronous stop can only signal a listener after a fresh identity
+    // proof. Missing/mismatched evidence leaves the durable record intact for
+    // the bounded async retry/recovery path.
+    signalOwnedTarget(listener, null, "SIGTERM");
   }
   appStartedProfiles.delete(key);
   preparedGatewayKeys.delete(key);
+  const wrapperAlive = ownedTargetStatus(wrapper, proc);
+  const listenerAlive = ownedTargetStatus(listener);
   if (
     ownership !== null &&
-    ownership.spawnedPid !== null &&
-    ((proc?.pid === ownership.spawnedPid && trackedProcessStillAlive) ||
-      (pid === ownership.spawnedPid &&
-        pidIsAliveAs(ownership.spawnedPid, GATEWAY_IMAGE_PREFIXES)))
+    (wrapperAlive !== "dead" || listenerAlive !== "dead")
   ) {
     scheduleGatewayOwnershipTermination(profile, ownership);
   } else if (ownership !== null) {
@@ -4910,6 +5535,18 @@ export async function stopAeraOwnedGateways(): Promise<void> {
 async function stopAeraOwnedGateway(profile: string): Promise<void> {
   const key = profileKey(profile);
   cancelGatewayPidAdoption(profile);
+  // App teardown is not allowed to weaken the synchronous stop boundary. A
+  // corrupt/truncated pending transaction means the durable launch identity
+  // may differ from this instance's cached record, so no ChildProcess handle
+  // or PID may be signalled until the ledger is readable again.
+  if (
+    gatewayProcessOwnership === null ||
+    gatewayProcessOwnership.getLoadIssue() !== null
+  ) {
+    throw new Error(
+      `Aera gateway ownership is unavailable for ${key}; refusing an unverified process stop.`,
+    );
+  }
   const proc = gatewayProcesses.get(key) ?? null;
   // App shutdown uses the process-tree path rather than stopGateway(). Drain
   // the same loopback pools here while the listener is still alive, otherwise
@@ -4918,7 +5555,6 @@ async function stopAeraOwnedGateway(profile: string): Promise<void> {
   let ownership: GatewayLaunchOwnershipRecord | null = null;
   try {
     ownership = gatewayProcessOwnership?.get(key) ?? null;
-    ownership = adoptGatewayPidFromFile(profile, ownership);
   } catch {
     // Without a valid durable record, only the exact in-memory child is owned.
   }
@@ -4927,17 +5563,44 @@ async function stopAeraOwnedGateway(profile: string): Promise<void> {
   const trackedProcessWasAlive = proc !== null && isChildProcessAlive(proc);
   if (trackedProcessWasAlive) {
     if (
-      ownership?.spawnedPid !== null &&
-      ownership?.spawnedPid !== undefined &&
+      ownership !== null &&
+      ownership.spawnedPid !== null &&
       proc?.pid !== ownership.spawnedPid
     ) {
       throw new Error(
         `Aera gateway ownership identity changed for ${key}; refusing an unverified process stop.`,
       );
     }
+    if (ownership !== null) {
+      const wrapperStatus = ownedTargetStatus(wrapperTarget(ownership), proc);
+      if (wrapperStatus !== "alive") {
+        throw new Error(
+          `Aera gateway wrapper identity could not be verified for ${key}; refusing an unverified process stop.`,
+        );
+      }
+    } else {
+      // A process handle without a durable creation token is not enough to
+      // authorize a shutdown during app teardown. Leave it for explicit
+      // operator recovery rather than risking a reused PID.
+      throw new Error(
+        `Aera gateway ownership is unavailable for ${key}; refusing an unverified process stop.`,
+      );
+    }
     const result = await terminateProcessTree(proc!, {
       detachedProcessGroup: process.platform !== "win32",
       forceAfterMs: 3_000,
+      verifyRootOwnership: (pid) => {
+        if (pid !== wrapperTarget(ownership!)?.pid) return false;
+        try {
+          const current = gatewayProcessOwnership?.get(key) ?? null;
+          return (
+            current?.launchId === ownership!.launchId &&
+            ownedTargetStatus(wrapperTarget(current), proc) === "alive"
+          );
+        } catch {
+          return false;
+        }
+      },
       ...(process.platform === "win32"
         ? {
             commandTimeoutMs: 3_000,
@@ -4952,64 +5615,100 @@ async function stopAeraOwnedGateway(profile: string): Promise<void> {
         `Aera gateway process tree did not fully exit: ${result.remainingPids.join(",")}`,
       );
     }
+    // A successful bounded tree result is the lifecycle authority. Test
+    // doubles and a few Windows child handles may not emit `close` or update
+    // `exitCode` synchronously, so retaining the handle here would make the
+    // ownership scheduler believe the wrapper is still alive and wait until
+    // its retry budget expires.
+    if (gatewayProcesses.get(key) === proc) gatewayProcesses.delete(key);
   }
   if (!proc || !isChildProcessAlive(proc)) gatewayProcesses.delete(key);
 
   const pidEntry = readPidFileEntry(profile);
-  if (
-    ownership !== null &&
-    ownership.spawnedPid !== null &&
-    pidEntry !== null &&
-    pidEntry.pid === ownership.spawnedPid &&
-    pidEntry.pid !== ownership.preLaunchPid &&
-    pidEntry.pid !== proc?.pid &&
-    pidIsAliveAs(pidEntry.pid, GATEWAY_IMAGE_PREFIXES)
-  ) {
-    const result = await terminateProcessTreeByPid(pidEntry.pid, {
-      detachedProcessGroup: false,
-      forceAfterMs: 3_000,
-      ...(process.platform === "win32"
-        ? {
-            commandTimeoutMs: 3_000,
-            snapshotTimeoutMs: 3_000,
-            snapshotTotalBudgetMs: 6_000,
-            diagnosticProfileKey: key,
-          }
-        : {}),
-    });
-    if (result.remainingPids.length > 0) {
+  const latestOwnership = gatewayProcessOwnership?.get(key) ?? ownership;
+  const listener =
+    latestOwnership === null ? null : listenerTarget(latestOwnership, pidEntry);
+  if (listener !== null && listener.pid !== proc?.pid) {
+    const listenerStatus = ownedTargetStatus(listener);
+    if (listenerStatus === "unknown") {
       throw new Error(
-        `Aera gateway listener process tree did not fully exit: ${result.remainingPids.join(",")}`,
+        `Aera gateway listener identity could not be verified for ${key}; refusing an unverified process stop.`,
       );
+    }
+    if (listenerStatus === "mismatch") {
+      throw new Error(
+        `Aera gateway listener identity changed for ${key}; refusing an unverified process stop.`,
+      );
+    }
+    if (listenerStatus === "alive") {
+      const result = await terminateProcessTreeByPid(listener.pid, {
+        detachedProcessGroup: false,
+        forceAfterMs: 3_000,
+        verifyRootOwnership: (pid) => {
+          if (pid !== listener.pid || readPidFile(profile) !== pid)
+            return false;
+          try {
+            const current = gatewayProcessOwnership?.get(key) ?? null;
+            return (
+              current?.launchId === latestOwnership?.launchId &&
+              ownedTargetStatus(
+                current === null
+                  ? null
+                  : listenerTarget(current, readPidFileEntry(profile)),
+              ) === "alive"
+            );
+          } catch {
+            return false;
+          }
+        },
+        ...(process.platform === "win32"
+          ? {
+              commandTimeoutMs: 3_000,
+              snapshotTimeoutMs: 3_000,
+              snapshotTotalBudgetMs: 6_000,
+              diagnosticProfileKey: key,
+            }
+          : {}),
+      });
+      if (result.remainingPids.length > 0) {
+        throw new Error(
+          `Aera gateway listener process tree did not fully exit: ${result.remainingPids.join(",")}`,
+        );
+      }
+      // The listener has just been identity-verified and fully drained. Clear
+      // only its still-matching pid marker before any durable ownership
+      // reconciliation can drop the record; otherwise a wrapper/listener
+      // adoption leaves a stale gateway.pid behind.
+      clearPidFileBestEffort(profile, listener.pid);
     }
   }
 
   appStartedProfiles.delete(key);
   preparedGatewayKeys.delete(key);
   invalidateApiCacheFor(profile);
-  if (ownership !== null) {
-    const spawnedPid = ownership.spawnedPid;
+  if (latestOwnership !== null) {
+    const knownPids = new Set(
+      [
+        wrapperTarget(latestOwnership)?.pid,
+        listenerTarget(latestOwnership, pidEntry)?.pid,
+      ].filter((value): value is number => value !== undefined),
+    );
     const replacementPid =
-      spawnedPid !== null && pidEntry !== null && pidEntry.pid !== spawnedPid;
+      pidEntry !== null &&
+      pidEntry.pid !== latestOwnership.preLaunchPid &&
+      !knownPids.has(pidEntry.pid) &&
+      pidIsAliveAs(pidEntry.pid, GATEWAY_IMAGE_PREFIXES);
     if (replacementPid) {
-      if (
-        trackedProcessWasAlive ||
-        !pidIsAliveAs(spawnedPid, GATEWAY_IMAGE_PREFIXES)
-      ) {
-        // The exact process this instance launched is gone. Preserve the
-        // durable record because a different PID now occupies the Profile;
-        // cold recovery must classify that replacement before any signal.
-        return;
-      }
-      throw new Error(
-        `Aera gateway replacement PID could not be disambiguated for ${key}.`,
-      );
+      // A different process now occupies the Profile. Preserve the durable
+      // record so a later cold recovery can classify it; never clear or signal
+      // the replacement from this shutdown path.
+      return;
     }
-    reconcileCompletedGatewayOwnership(profile, ownership);
+    reconcileCompletedGatewayOwnership(profile, latestOwnership);
     try {
-      if (gatewayProcessOwnership?.get(ownership.profileId) !== null) {
-        scheduleGatewayOwnershipTermination(profile, ownership);
-        await waitForGatewayOwnershipTermination(ownership);
+      if (gatewayProcessOwnership?.get(latestOwnership.profileId) !== null) {
+        scheduleGatewayOwnershipTermination(profile, latestOwnership);
+        await waitForGatewayOwnershipTermination(latestOwnership);
       }
     } catch (error) {
       // Keep the durable record for a later cold-start reconciliation.
@@ -5021,7 +5720,8 @@ async function stopAeraOwnedGateway(profile: string): Promise<void> {
       );
     }
   } else {
-    clearPidFileBestEffort(profile);
+    // Without durable ownership, only the exact in-memory child above was
+    // ours. Never remove or signal an unrelated PID file.
   }
 }
 
@@ -5042,6 +5742,9 @@ export function recoverAeraOwnedGatewaysFromPreviousRun(): {
     recovery = gatewayProcessOwnership.reconcileColdStart({
       readCurrentPid: (profileId) => readPidFile(profileId),
       isAlive: (pid) => pidIsAliveAs(pid, GATEWAY_IMAGE_PREFIXES),
+      readEvidence: (pid) => readGatewayProcessEvidence(pid),
+      clearDeadListenerPid: (profileId, pid) =>
+        clearPidFileBestEffort(profileId, pid),
     });
   } catch (error) {
     const errorCode =
@@ -5084,30 +5787,20 @@ function reapRecoveredAeraOwnedGateway(
   } catch {
     return "ambiguous";
   }
-  if (ownership === null || ownership.spawnedPid === null) {
+  if (ownership === null) {
     return "ambiguous";
   }
 
-  const currentPid = readPidFile(profile);
-  if (currentPid !== ownership.spawnedPid) {
-    if (
-      currentPid === null &&
-      !pidIsAliveAs(ownership.spawnedPid, GATEWAY_IMAGE_PREFIXES)
-    ) {
-      try {
-        gatewayProcessOwnership.clearLaunch(profile, ownership.launchId);
-        return "inactive";
-      } catch {
-        return "ambiguous";
-      }
-    }
+  const pidEntry = readPidFileEntry(profile);
+  const listener = listenerTarget(ownership, pidEntry);
+  if (listener === null || pidEntry === null || pidEntry.pid !== listener.pid) {
     return "ambiguous";
   }
-  if (
-    currentPid === ownership.preLaunchPid ||
-    !pidIsAliveAs(currentPid, GATEWAY_IMAGE_PREFIXES)
-  ) {
+  const listenerStatus = ownedTargetStatus(listener);
+  if (listenerStatus === "unknown") return "ambiguous";
+  if (listenerStatus === "dead") {
     try {
+      clearPidFileBestEffort(profile, listener.pid);
       gatewayProcessOwnership.clearLaunch(profile, ownership.launchId);
       return "inactive";
     } catch {
@@ -5115,13 +5808,27 @@ function reapRecoveredAeraOwnedGateway(
     }
   }
 
-  try {
-    process.kill(currentPid, "SIGTERM");
-  } catch {
-    if (pidIsAliveAs(currentPid, GATEWAY_IMAGE_PREFIXES)) {
+  if (!signalOwnedTarget(listener, null, "SIGTERM")) {
+    // A failed revalidation (including PID reuse or missing evidence) is an
+    // ambiguity, never permission to clear or signal a replacement process.
+    if (ownedTargetStatus(listener) !== "dead") return "ambiguous";
+    try {
+      clearPidFileBestEffort(profile, listener.pid);
+      gatewayProcessOwnership.clearLaunch(profile, ownership.launchId);
+      return "inactive";
+    } catch {
       return "ambiguous";
     }
+  }
+
+  // A listener can exit synchronously in response to TERM (especially during
+  // cold recovery). Re-check the complete identity proof immediately so an
+  // exact dead target does not leave a stale gateway.pid while the bounded
+  // retry timer is still pending. A reused or unreadable PID remains
+  // ambiguous and is never cleared here.
+  if (ownedTargetStatus(listener) === "dead") {
     try {
+      clearPidFileBestEffort(profile, listener.pid);
       gatewayProcessOwnership.clearLaunch(profile, ownership.launchId);
       return "inactive";
     } catch {
@@ -5184,8 +5891,6 @@ function scheduleGatewayOwnershipTermination(
   attempt = 0,
   tracking: GatewayOwnershipTerminationTracking = {},
 ): void {
-  if (ownership.spawnedPid === null) return;
-  const spawnedPid = ownership.spawnedPid;
   const key = ownership.profileId;
   const existing = gatewayOwnershipTerminationTimers.get(key);
   if (existing) clearTimeout(existing);
@@ -5198,60 +5903,83 @@ function scheduleGatewayOwnershipTermination(
     } catch {
       return;
     }
-    if (
-      current === null ||
-      current.launchId !== ownership.launchId ||
-      (current.spawnedPid !== spawnedPid &&
-        !(
-          tracking.acceptUncommittedSpawnedPid === true &&
-          current.spawnedPid === null
-        ))
-    ) {
+    if (current === null || current.launchId !== ownership.launchId) {
       return;
     }
 
     const trackedProcess = tracking.trackedProcess;
-    const alive =
-      trackedProcess?.pid === spawnedPid
-        ? isChildProcessAlive(trackedProcess)
-        : pidIsAliveAs(spawnedPid, GATEWAY_IMAGE_PREFIXES);
-    if (!alive) {
-      clearCompletedGatewayOwnership(profile, ownership);
-      return;
+    const pidEntry = readPidFileEntry(profile);
+    const targets: GatewayOwnedProcessTarget[] = [];
+    const wrapper = wrapperTarget(current);
+    const listener = listenerTarget(current, pidEntry);
+    if (wrapper !== null) targets.push(wrapper);
+    if (
+      listener !== null &&
+      !targets.some((target) => target.pid === listener.pid)
+    ) {
+      targets.push(listener);
+    }
+    // A markSpawned persistence failure can leave the launch record at its
+    // intent state while the exact ChildProcess is still alive. Keep the
+    // launch-scoped handle eligible for termination, but never invent a
+    // durable PID target from an unverified pid file.
+    if (
+      targets.length === 0 &&
+      tracking.acceptUncommittedSpawnedPid === true &&
+      trackedProcess?.pid !== undefined
+    ) {
+      targets.push({
+        pid: trackedProcess.pid,
+        identity: null,
+        image: null,
+        kind: "wrapper",
+      });
     }
 
-    if (attempt >= GATEWAY_TERMINATION_GRACE_ATTEMPTS) {
-      if (
-        trackedProcess?.pid === spawnedPid &&
-        isChildProcessAlive(trackedProcess)
-      ) {
-        try {
-          trackedProcess.kill("SIGKILL");
-        } catch {
-          // Preserve the record for the next bounded recovery attempt.
-        }
-      } else {
-        const currentPid = readPidFile(profile);
-        if (currentPid === spawnedPid) {
-          const revalidatedPid = readPidFile(profile);
+    let aliveTarget = false;
+    let uncertainTarget = false;
+    for (const target of targets) {
+      const status = ownedTargetStatus(
+        target,
+        target.kind === "wrapper" ? trackedProcess : null,
+      );
+      if (status === "alive") {
+        aliveTarget = true;
+        if (attempt >= GATEWAY_TERMINATION_GRACE_ATTEMPTS) {
+          // Re-read the pid file immediately before listener escalation, then
+          // run the same identity/image gate used by ordinary TERM. A changed
+          // file, PID reuse, or unavailable evidence is never signalled.
           if (
-            revalidatedPid === spawnedPid &&
-            pidIsAliveAs(revalidatedPid, GATEWAY_IMAGE_PREFIXES)
+            target.kind !== "listener" ||
+            readPidFile(profile) === target.pid
           ) {
-            try {
-              process.kill(revalidatedPid, "SIGKILL");
-            } catch {
-              // Preserve the record for the next bounded recovery attempt.
+            if (
+              !signalOwnedTarget(
+                target,
+                target.kind === "wrapper" ? (trackedProcess ?? null) : null,
+                "SIGKILL",
+              )
+            ) {
+              uncertainTarget = true;
             }
+          } else {
+            uncertainTarget = true;
           }
         }
+      } else if (status === "unknown" || status === "mismatch") {
+        uncertainTarget = true;
       }
+    }
+
+    if (!aliveTarget && !uncertainTarget) {
+      clearCompletedGatewayOwnership(profile, current);
+      return;
     }
 
     if (attempt < GATEWAY_TERMINATION_FORCE_ATTEMPTS) {
       scheduleGatewayOwnershipTermination(
         profile,
-        ownership,
+        current,
         attempt + 1,
         tracking,
       );
@@ -5268,8 +5996,13 @@ function clearCompletedGatewayOwnership(
   profile: string | undefined,
   ownership: GatewayLaunchOwnershipRecord,
 ): void {
-  if (ownership.spawnedPid !== null) {
-    clearPidFileBestEffort(profile, ownership.spawnedPid);
+  // After wrapper/listener adoption gateway.pid names the long-lived
+  // listener, not the short-lived spawn wrapper. Prefer that exact durable
+  // PID when clearing the file; falling back to spawnedPid preserves legacy
+  // same-PID records without ever unlinking a replacement PID file.
+  const expectedPid = ownership.listenerPid ?? ownership.spawnedPid;
+  if (expectedPid !== null) {
+    clearPidFileBestEffort(profile, expectedPid);
   }
   try {
     gatewayProcessOwnership?.clearLaunch(
@@ -5284,21 +6017,222 @@ function clearCompletedGatewayOwnership(
 function clearPidFileBestEffort(
   profile: string | undefined,
   expectedPid?: number,
-): void {
+): boolean {
   const pidEntry = readPidFileEntry(profile);
-  if (pidEntry === null) return;
-  if (expectedPid !== undefined && pidEntry.pid !== expectedPid) return;
+  if (pidEntry === null) return true;
+  if (expectedPid !== undefined && pidEntry.pid !== expectedPid) return false;
   try {
     unlinkSync(pidEntry.path);
+    return true;
   } catch {
     // A stale exact PID is still guarded by process-image verification.
+    return false;
   }
+}
+
+/**
+ * Explicitly replace a healthy, unrecorded legacy Gateway during the native
+ * restart/takeover flow.  Ordinary shutdown paths must never use this helper:
+ * they have no durable proof that a PID-file process belongs to Aera.  The
+ * caller supplies the PID observed immediately before the restart and this
+ * function re-reads the file and verifies liveness before handing the exact
+ * PID to the bounded process-tree terminator.  A changed PID, unavailable
+ * liveness evidence, or an incompletely drained tree is a failed takeover;
+ * none of those cases signal a replacement process.
+ */
+async function stopLegacyGatewayForTakeover(
+  profile: string | undefined,
+  expectedPidEntry: { path: string; pid: number },
+  timeoutMs: number,
+  pollMs: number,
+): Promise<boolean> {
+  const current = readPidFileEntry(profile);
+  if (current === null || current.pid !== expectedPidEntry.pid) {
+    return false;
+  }
+  if (!pidIsAliveAs(current.pid, GATEWAY_IMAGE_PREFIXES)) {
+    clearPidFileBestEffort(profile, current.pid);
+    return true;
+  }
+  const expectedEvidence = readGatewayProcessEvidence(current.pid);
+  if (!isGatewayProcessEvidence(expectedEvidence)) return false;
+
+  drainGatewayConnections(profile);
+  try {
+    const result = await terminateProcessTreeByPid(current.pid, {
+      detachedProcessGroup: false,
+      forceAfterMs: Math.max(0, timeoutMs),
+      pollIntervalMs: Math.max(1, pollMs),
+      verifyRootOwnership: (pid) =>
+        pid === current.pid &&
+        readPidFile(profile) === pid &&
+        gatewayProcessEvidenceStillMatches(pid, expectedEvidence),
+      ...(process.platform === "win32"
+        ? {
+            commandTimeoutMs: Math.max(1, Math.min(timeoutMs, 3_000)),
+            snapshotTimeoutMs: Math.max(1, Math.min(timeoutMs, 3_000)),
+            snapshotTotalBudgetMs: Math.max(1, Math.min(timeoutMs, 6_000)),
+            diagnosticProfileKey: profileKey(profile),
+          }
+        : {}),
+    });
+    if (result.remainingPids.length > 0) {
+      return false;
+    }
+  } catch {
+    return false;
+  }
+
+  // Only remove the legacy marker if the file still names the exact process
+  // we just drained.  A concurrently published replacement remains intact.
+  clearPidFileBestEffort(profile, current.pid);
+  return true;
 }
 
 // Python image prefixes covering both native Windows (pythonw.exe / python.exe)
 // and POSIX (python, python3, pythonw). Used to verify the PID we read from
 // gateway.pid actually belongs to a python process before reporting alive.
 const GATEWAY_IMAGE_PREFIXES = ["python", "pythonw"];
+
+type GatewayOwnedProcessTarget = {
+  pid: number;
+  identity: string | null;
+  image: string | null;
+  kind: "wrapper" | "listener";
+};
+
+function wrapperTarget(
+  ownership: GatewayLaunchOwnershipRecord,
+): GatewayOwnedProcessTarget | null {
+  if (ownership.spawnedPid === null) return null;
+  return {
+    pid: ownership.spawnedPid,
+    identity: ownership.spawnedIdentity,
+    image: ownership.spawnedImage,
+    kind: "wrapper",
+  };
+}
+
+function listenerTarget(
+  ownership: GatewayLaunchOwnershipRecord,
+  pidEntry?: { pid: number } | null,
+): GatewayOwnedProcessTarget | null {
+  if (ownership.listenerPid !== null) {
+    return {
+      pid: ownership.listenerPid,
+      identity: ownership.listenerIdentity,
+      image: ownership.listenerImage,
+      kind: "listener",
+    };
+  }
+  // Compatibility for v1/v2 records and non-daemonized test/Runtime
+  // launches: only treat the spawned PID as the listener when the pid file
+  // names that exact same PID. A cross-PID hand-off without explicit listener
+  // evidence remains ambiguous and is never signalled.
+  if (pidEntry?.pid !== undefined && ownership.spawnedPid === pidEntry.pid) {
+    return {
+      pid: ownership.spawnedPid,
+      identity: ownership.spawnedIdentity,
+      image: ownership.spawnedImage,
+      kind: "listener",
+    };
+  }
+  return null;
+}
+
+type OwnedTargetStatus = "alive" | "dead" | "unknown" | "mismatch";
+
+interface OwnedTargetInspection {
+  status: OwnedTargetStatus;
+  observed: ProcessIdentityEvidence | null;
+}
+
+/**
+ * Refresh every piece of process evidence in one place immediately before a
+ * lifecycle decision. `mismatch` is deliberately distinct from `dead`: a
+ * live PID with a different creation token/image is a possible PID reuse and
+ * must keep the durable ownership guard rather than being silently cleared.
+ */
+function inspectOwnedTarget(
+  target: GatewayOwnedProcessTarget | null,
+  trackedProcess?: ChildProcess | null,
+): OwnedTargetInspection {
+  if (target === null) return { status: "dead", observed: null };
+
+  const trackedAlive =
+    target.kind === "wrapper" &&
+    trackedProcess?.pid === target.pid &&
+    isChildProcessAlive(trackedProcess);
+  const observed = readGatewayProcessEvidence(target.pid);
+
+  // A ChildProcess exit state is definitive. For a PID-only target, a false
+  // liveness probe is treated as dead unless it supplied contradictory live
+  // evidence; an unavailable identity while the PID is live is unknown.
+  const live = trackedAlive || pidIsAliveAs(target.pid, GATEWAY_IMAGE_PREFIXES);
+  if (!live) {
+    if (
+      observed !== null &&
+      target.identity !== null &&
+      target.image !== null &&
+      !processEvidenceMatches(observed, {
+        identity: target.identity,
+        image: target.image,
+      })
+    ) {
+      return { status: "mismatch", observed };
+    }
+    return { status: "dead", observed };
+  }
+
+  // A PID/handle is never ownership evidence by itself. Missing or unreadable
+  // identity/image data is an ambiguous live target; callers must not signal
+  // or clear it automatically.
+  if (target.identity === null || target.image === null || observed === null) {
+    return { status: "unknown", observed };
+  }
+  return processEvidenceMatches(observed, {
+    identity: target.identity,
+    image: target.image,
+  })
+    ? { status: "alive", observed }
+    : { status: "mismatch", observed };
+}
+
+function ownedTargetStatus(
+  target: GatewayOwnedProcessTarget | null,
+  trackedProcess?: ChildProcess | null,
+): OwnedTargetStatus {
+  return inspectOwnedTarget(target, trackedProcess).status;
+}
+
+/**
+ * Revalidate a target and send one signal only when its creation identity and
+ * canonical executable image still match the durable record. There is no
+ * fallback to a raw PID/ChildProcess kill on an unknown or mismatched probe.
+ */
+function signalOwnedTarget(
+  target: GatewayOwnedProcessTarget | null,
+  trackedProcess: ChildProcess | null,
+  signal: NodeJS.Signals,
+): boolean {
+  const inspection = inspectOwnedTarget(target, trackedProcess);
+  if (inspection.status !== "alive" || target === null) return false;
+  try {
+    if (
+      target.kind === "wrapper" &&
+      trackedProcess !== null &&
+      trackedProcess?.pid === target.pid &&
+      isChildProcessAlive(trackedProcess)
+    ) {
+      trackedProcess.kill(signal);
+      return true;
+    }
+    process.kill(target.pid, signal);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function isChildProcessAlive(proc: ChildProcess): boolean {
   if (proc.exitCode !== null || proc.signalCode !== null) {
@@ -5314,11 +6248,48 @@ function isChildProcessAlive(proc: ChildProcess): boolean {
 }
 
 export function isGatewayRunning(profile?: string): boolean {
-  const proc = gatewayProcesses.get(profileKey(profile));
-  if (proc && isChildProcessAlive(proc)) return true;
-  const pid = readPidFile(profile);
-  if (!pid) return false;
-  return pidIsAliveAs(pid, GATEWAY_IMAGE_PREFIXES);
+  const key = profileKey(profile);
+  if (gatewayProcessOwnership?.getLoadIssue() !== null) return false;
+  let ownership: GatewayLaunchOwnershipRecord | null = null;
+  try {
+    ownership = gatewayProcessOwnership?.get(key) ?? null;
+  } catch {
+    return false;
+  }
+
+  const proc = gatewayProcesses.get(key);
+  if (proc && typeof proc.pid === "number") {
+    if (ownership === null) {
+      return (
+        isChildProcessAlive(proc) &&
+        isGatewayProcessEvidence(readGatewayProcessEvidence(proc.pid))
+      );
+    }
+    const target = wrapperTarget(ownership);
+    return (
+      target !== null &&
+      target.pid === proc.pid &&
+      ownedTargetStatus(target, proc) === "alive"
+    );
+  }
+
+  const pidEntry = readPidFileEntry(profile);
+  if (pidEntry === null) return false;
+  if (ownership !== null) {
+    const target = listenerTarget(ownership, pidEntry);
+    return (
+      target !== null &&
+      target.pid === pidEntry.pid &&
+      ownedTargetStatus(target) === "alive"
+    );
+  }
+  // An unrecorded legacy Gateway is deliberately not reported as owned/running
+  // by this status primitive. The explicit recovery path performs its own
+  // fresh identity/image probe before deciding whether a takeover is safe.
+  return (
+    pidIsAliveAs(pidEntry.pid, GATEWAY_IMAGE_PREFIXES) &&
+    isGatewayProcessEvidence(readGatewayProcessEvidence(pidEntry.pid))
+  );
 }
 
 export function isApiReady(): boolean {
@@ -5533,6 +6504,47 @@ async function restartGatewayLocallyOnce(
     const previousProcess = gatewayProcesses.get(key) ?? null;
     const previousStartedByApp = appStartedProfiles.has(key);
     const previousPidEntry = readPidFileEntry(profile);
+    // A healthy Gateway that predates the ownership ledger is replaceable only
+    // from this explicit restart/takeover flow.  Capture the ledger state
+    // before stopGateway() so an unavailable/corrupt ledger cannot silently
+    // authorize a PID-file kill.
+    let previousOwnership: GatewayLaunchOwnershipRecord | null = null;
+    let ownershipStateAvailable = false;
+    try {
+      if (
+        gatewayProcessOwnership !== null &&
+        gatewayProcessOwnership.getLoadIssue() === null
+      ) {
+        ownershipStateAvailable = true;
+        previousOwnership = gatewayProcessOwnership.get(key);
+      }
+    } catch {
+      ownershipStateAvailable = false;
+    }
+    if (
+      ownershipStateAvailable &&
+      previousOwnership === null &&
+      previousPidEntry !== null
+    ) {
+      const legacyStopped = await stopLegacyGatewayForTakeover(
+        profile,
+        previousPidEntry,
+        stopTimeoutMs,
+        healthPollMs,
+      );
+      if (!legacyStopped) {
+        console.error(
+          `[gateway:${key}] Native restart refused to take over an unverified legacy Gateway`,
+        );
+        restoreGatewayAfterRestartFailure(
+          profile,
+          previousProcess,
+          previousStartedByApp,
+          previousPidEntry,
+        );
+        return false;
+      }
+    }
     stopGateway(profile, true);
     const stopped = await waitForApiServerStopped(
       profile,
@@ -5589,22 +6601,15 @@ async function restartGatewayLocallyOnce(
         `[gateway:${key}] Port ${String(prepared.port)} not confirmed free; restarting anyway`,
       );
     }
-    const startResult = startGatewayDetailed(profile, prepared);
-    if (!startResult.success && !startResult.alreadyRunning) {
-      setApiCacheFor(profile, false);
-      markGatewayRestartFailed(profile);
-      return false;
-    }
-
-    const ready = await waitForApiServerReady(
-      healthTimeoutMs,
-      profile,
-      healthPollMs,
-      prepared.key,
-      prepared.port,
-    );
-    setApiCacheFor(profile, ready);
-    if (ready) return true;
+    const startResult = await startGatewayWithReadiness(profile, prepared, {
+      readyTimeoutMs: healthTimeoutMs,
+      pollMs: healthPollMs,
+      // Recovery is a gateway lifecycle operation.  Dashboard startup is
+      // deliberately left to its own caller so it cannot recurse into this
+      // recovery flight or create a second Runtime Python process.
+      warmDashboard: () => undefined,
+    });
+    if (startResult.ready === true) return true;
 
     // uvicorn/aiohttp on macOS may reject a rebind while the old listener's
     // TIME_WAIT entries are still inside the kernel, even after the port has
@@ -5614,18 +6619,12 @@ async function restartGatewayLocallyOnce(
     if (gatewayLogReportsAddressInUse(profile, gatewayLogOffset)) {
       stopGateway(profile, true);
       await delay(GATEWAY_EADDRINUSE_RETRY_DELAY_MS);
-      const retryStart = startGatewayDetailed(profile, prepared);
-      if (retryStart.success && !retryStart.alreadyRunning) {
-        const retryReady = await waitForApiServerReady(
-          healthTimeoutMs,
-          profile,
-          healthPollMs,
-          prepared.key,
-          prepared.port,
-        );
-        setApiCacheFor(profile, retryReady);
-        if (retryReady) return true;
-      }
+      const retryStart = await startGatewayWithReadiness(profile, prepared, {
+        readyTimeoutMs: healthTimeoutMs,
+        pollMs: healthPollMs,
+        warmDashboard: () => undefined,
+      });
+      if (retryStart.ready === true) return true;
     }
     markGatewayRestartFailed(profile);
     return false;
@@ -5786,20 +6785,12 @@ async function startGatewayWithRecoveryOnce(
     // real EADDRINUSE surfaces as a start failure with the gateway's own log,
     // which is far more actionable than silently refusing to start.
   }
-  const startResult = startGatewayDetailed(profile, prepared);
-  if (!startResult.success && !startResult.alreadyRunning) return false;
-
-  const ready = await waitForApiServerReady(
-    healthTimeoutMs,
-    profile,
-    healthPollMs,
-    prepared.key,
-    prepared.port,
-  );
-  if (ready) {
-    setApiCacheFor(profile, true);
-    return true;
-  }
+  const startResult = await startGatewayWithReadiness(profile, prepared, {
+    readyTimeoutMs: healthTimeoutMs,
+    pollMs: healthPollMs,
+    warmDashboard: () => undefined,
+  });
+  if (startResult.ready === true) return true;
 
   return restartGateway(
     profile,
@@ -5901,52 +6892,83 @@ async function restartGatewayViaCliOnce(
     const previousPidEntry = readPidFileEntry(profile);
     const logPath = gatewayLogPath(profile);
     const wasHealthyBeforeRestart = await isApiServerReady(profile);
+    if (
+      gatewayProcessOwnership === null ||
+      gatewayProcessOwnership.getLoadIssue() !== null
+    ) {
+      console.warn(
+        `[gateway:${key}] Refusing CLI restart while ownership state is unavailable.`,
+      );
+      return false;
+    }
+
+    // Every restart gets a durable launch intent before the Python wrapper is
+    // spawned.  When the profile is already ours, retain the old listener
+    // proof as a rollback guard; when it is a fresh profile, beginLaunch()
+    // still prevents a process from becoming implicitly owned after a crash.
+    const previousOwnership = gatewayProcessOwnership.get(key);
+    const preLaunchPid =
+      previousPidEntry?.pid ?? previousOwnership?.listenerPid ?? null;
+    let launchOwnership: GatewayLaunchOwnershipRecord;
+    let restartPreviousOwnership: GatewayLaunchOwnershipRecord | null = null;
+    try {
+      if (previousOwnership !== null) {
+        const restart = gatewayProcessOwnership.beginRestart({
+          profileId: key,
+          preLaunchPid,
+        });
+        launchOwnership = restart.record;
+        restartPreviousOwnership = restart.previous;
+      } else {
+        launchOwnership = gatewayProcessOwnership.beginLaunch({
+          profileId: key,
+          preLaunchPid,
+        });
+      }
+    } catch (error) {
+      console.warn(
+        `[gateway:${key}] Refusing CLI restart because ownership intent could not be recorded:`,
+        error instanceof Error ? error.message : String(error),
+      );
+      return false;
+    }
+
     appendFileSync(
       logPath,
       `\n[gateway:${key}] Desktop requested hermes gateway restart at ${new Date().toISOString()}\n`,
     );
 
-    return await new Promise<boolean>((resolve) => {
-      let proc: ChildProcess | null = null;
-      let stderrFd = -1;
-      try {
-        stderrFd = openSync(logPath, "a");
-        proc = spawn(
-          invocation.python,
-          invocation.cliArgs(
-            gatewayCliCommandArgs(profile, ["gateway", "restart"]),
-          ),
-          {
-            cwd: invocation.workingDirectory,
-            env: buildGatewayEnv(profile, prepared),
-            stdio: ["ignore", "ignore", stderrFd >= 0 ? stderrFd : "ignore"],
-            detached: true,
-            ...HIDDEN_SUBPROCESS_OPTIONS,
-          },
-        );
-        proc.unref();
-      } catch (err) {
-        console.error(
-          `[gateway:${key}] Failed to launch restart command:`,
-          (err as Error).message,
-        );
-        if (stderrFd >= 0) {
-          try {
-            closeSync(stderrFd);
-          } catch {
-            // ignore
-          }
-        }
-        restoreGatewayAfterRestartFailure(
-          profile,
-          previousProcess,
-          previousStartedByApp,
-          previousPidEntry,
-        );
-        resolve(false);
-        return;
+    let proc: ChildProcess | null = null;
+    let stderrFd = -1;
+    let spawnArgs: string[] | undefined;
+    let spawnError: unknown = null;
+    let spawnedEvidence: ProcessIdentityEvidence | null = null;
+    try {
+      stderrFd = openSync(logPath, "a");
+      spawnArgs = invocation.cliArgs(
+        gatewayCliCommandArgs(profile, ["gateway", "restart"]),
+      );
+      proc = spawn(invocation.python, spawnArgs, {
+        cwd: invocation.workingDirectory,
+        env: buildGatewayEnv(profile, prepared),
+        stdio: ["ignore", "ignore", stderrFd >= 0 ? stderrFd : "ignore"],
+        detached: true,
+        ...HIDDEN_SUBPROCESS_OPTIONS,
+      });
+      if (typeof proc.pid !== "number") {
+        throw new Error("The restart process identity is unavailable.");
       }
-
+      spawnedEvidence = readGatewayProcessEvidence(proc.pid);
+      launchOwnership = gatewayProcessOwnership.markSpawned({
+        profileId: key,
+        launchId: launchOwnership.launchId,
+        spawnedPid: proc.pid,
+        spawnedIdentity: spawnedEvidence?.identity,
+        spawnedImage: spawnedEvidence?.image,
+      });
+    } catch (error) {
+      spawnError = error;
+    } finally {
       if (stderrFd >= 0) {
         try {
           closeSync(stderrFd);
@@ -5954,88 +6976,170 @@ async function restartGatewayViaCliOnce(
           // best-effort
         }
       }
+    }
 
-      let settled = false;
-      let exitedSuccessfully = false;
-
-      const finish = (ok: boolean): void => {
-        if (settled) return;
-        settled = true;
-        if (ok && proc && isChildProcessAlive(proc)) {
-          gatewayProcesses.set(key, proc);
-          appStartedProfiles.add(key);
-        } else if (!ok) {
-          restoreGatewayAfterRestartFailure(
-            profile,
-            previousProcess,
-            previousStartedByApp,
-            previousPidEntry,
+    if (spawnError !== null || proc === null) {
+      console.error(
+        `[gateway:${key}] Failed to launch restart command:`,
+        spawnError instanceof Error ? spawnError.message : String(spawnError),
+      );
+      // A failed spawn has no live child to clean.  Restore the exact prior
+      // record (or remove the fresh intent) without ever trusting a bare PID.
+      try {
+        if (restartPreviousOwnership !== null) {
+          gatewayProcessOwnership.restoreRestart(
+            launchOwnership.launchId,
+            restartPreviousOwnership,
           );
+        } else {
+          gatewayProcessOwnership.clearLaunch(key, launchOwnership.launchId);
         }
-        setApiCacheFor(profile, ok);
-        resolve(ok);
-      };
+      } catch {
+        // Keep the durable guard if persistence/concurrency prevents rollback.
+      }
+      setApiCacheFor(profile, wasHealthyBeforeRestart);
+      return false;
+    }
 
-      proc.on("error", (err) => {
-        console.error(
-          `[gateway:${key}] Failed to restart gateway:`,
-          err.message,
-        );
-        finish(false);
-      });
-
-      proc.on("close", (code, signal) => {
-        if (settled) return;
-        if (code !== 0) {
-          console.error(
-            `[gateway:${key}] Restart exited with code ${code}${signal ? ` (signal: ${signal})` : ""}. ` +
-              `Check ${logPath} for details.`,
-          );
-          finish(false);
-          return;
-        }
-        exitedSuccessfully = true;
-      });
-
-      void (async () => {
-        const deadline = Date.now() + healthTimeoutMs;
-        let sawUnhealthy = !wasHealthyBeforeRestart;
-
-        while (!settled && Date.now() < deadline) {
-          const ready = await isApiServerReady(profile);
-          if (!ready) sawUnhealthy = true;
-          if (ready && (sawUnhealthy || exitedSuccessfully)) {
-            finish(true);
-            return;
-          }
-          await delay(healthPollMs);
-        }
-
-        if (!settled) {
-          console.error(
-            `[gateway:${key}] Restart command did not make /health ready within ${healthTimeoutMs}ms. ` +
-              `Check ${logPath} for details.`,
-          );
-          try {
-            proc?.kill("SIGTERM");
-          } catch {
-            // already gone
-          }
-          finish(false);
-        }
-      })().catch((err) => {
-        console.error(
-          `[gateway:${key}] Failed while waiting for restart health:`,
-          (err as Error).message,
-        );
-        try {
-          proc?.kill("SIGTERM");
-        } catch {
-          // already gone
-        }
-        finish(false);
-      });
+    let closeCode: number | null = null;
+    let closeSignal: NodeJS.Signals | null = null;
+    let processError: Error | null = null;
+    proc.once("error", (error) => {
+      processError = error;
+      console.error(
+        `[gateway:${key}] Failed to restart gateway:`,
+        error.message,
+      );
     });
+    proc.once("close", (code, signal) => {
+      closeCode = code;
+      closeSignal = signal;
+      if (gatewayProcesses.get(key) === proc) gatewayProcesses.delete(key);
+      // A wrapper close does not mean the adopted listener is gone. Retain
+      // the app-level ownership marker whenever the durable listener proof
+      // still exists.
+      const current = gatewayProcessOwnership?.get(key) ?? null;
+      if (current?.listenerPid === null || current === null) {
+        appStartedProfiles.delete(key);
+      }
+      invalidateApiCacheFor(profile);
+      startHealthPolling();
+    });
+    proc.unref();
+    gatewayProcesses.set(key, proc);
+    appStartedProfiles.add(key);
+
+    const serving = await waitForGatewayServing(
+      profile,
+      healthTimeoutMs,
+      healthPollMs,
+      prepared.key,
+      prepared.port,
+      preLaunchPid,
+    );
+    const processExitedWithError =
+      processError !== null || (closeCode !== null && closeCode !== 0);
+    let readyAndOwned = false;
+    if (serving.ready && !processExitedWithError) {
+      const current = gatewayProcessOwnership.get(key);
+      const adopted = adoptGatewayPidFromFile(
+        profile,
+        current,
+        serving.listenerEvidence,
+        { replaceExistingListener: restartPreviousOwnership !== null },
+      );
+      readyAndOwned =
+        adopted !== null &&
+        adopted.listenerPid === serving.listenerPid &&
+        adopted.listenerIdentity === serving.listenerEvidence?.identity &&
+        adopted.listenerImage === serving.listenerEvidence?.image;
+      if (readyAndOwned) {
+        if (isChildProcessAlive(proc)) gatewayProcesses.set(key, proc);
+        else gatewayProcesses.delete(key);
+        appStartedProfiles.add(key);
+        setApiCacheFor(profile, true);
+        return true;
+      }
+      console.error(
+        `[gateway:${key}] Restart listener became ready but durable ownership adoption failed.`,
+      );
+    }
+
+    const cleanup = await cleanupGatewayLaunch(
+      key,
+      profile,
+      proc,
+      serving.listenerPid,
+      serving.listenerEvidence,
+    );
+    if (!cleanup.terminated) {
+      // Do not restore the previous record while a new identity-bound target
+      // is still alive: that would orphan a process and make a later stop
+      // unsafe. The current launch intent remains the fail-closed guard.
+      console.error(
+        `[gateway:${key}] Restart cleanup could not be confirmed; retaining durable ownership.`,
+      );
+      setApiCacheFor(profile, false);
+      return false;
+    }
+
+    // Once every newly spawned target is confirmed gone, either restore the
+    // exact prior listener proof (if it is still present/ambiguous) or clear
+    // the failed fresh launch. A dead prior process is deliberately not
+    // resurrected in memory.
+    try {
+      if (restartPreviousOwnership === null) {
+        gatewayProcessOwnership.clearLaunch(key, launchOwnership.launchId);
+        gatewayProcesses.delete(key);
+        appStartedProfiles.delete(key);
+      } else {
+        const priorWrapperStatus = ownedTargetStatus(
+          wrapperTarget(restartPreviousOwnership),
+          previousProcess,
+        );
+        const priorListenerStatus = ownedTargetStatus(
+          listenerTarget(restartPreviousOwnership, previousPidEntry),
+        );
+        const priorGone =
+          priorWrapperStatus === "dead" && priorListenerStatus === "dead";
+        if (priorGone) {
+          gatewayProcessOwnership.clearLaunch(key, launchOwnership.launchId);
+          gatewayProcesses.delete(key);
+          appStartedProfiles.delete(key);
+        } else {
+          gatewayProcessOwnership.restoreRestart(
+            launchOwnership.launchId,
+            restartPreviousOwnership,
+          );
+          if (priorWrapperStatus === "alive" && previousProcess !== null) {
+            gatewayProcesses.set(key, previousProcess);
+          } else {
+            gatewayProcesses.delete(key);
+          }
+          if (
+            priorWrapperStatus === "alive" ||
+            priorListenerStatus === "alive" ||
+            priorWrapperStatus === "unknown" ||
+            priorListenerStatus === "unknown" ||
+            priorWrapperStatus === "mismatch" ||
+            priorListenerStatus === "mismatch"
+          ) {
+            appStartedProfiles.add(key);
+          } else if (!previousStartedByApp) {
+            appStartedProfiles.delete(key);
+          }
+        }
+      }
+    } catch {
+      // Preserve whichever durable record is currently on disk; never replace
+      // a concurrent launch with a stale rollback.
+    }
+    setApiCacheFor(profile, false);
+    console.error(
+      `[gateway:${key}] Restart did not become ready within ${healthTimeoutMs}ms pid=${proc.pid} exitCode=${closeCode ?? "still-running"}${closeSignal ? ` signal=${closeSignal}` : ""}. ` +
+        `Check ${logPath} for details.`,
+    );
+    return readyAndOwned;
   } catch (err) {
     console.error(
       "[gateway] Restart failed before the command could complete:",
