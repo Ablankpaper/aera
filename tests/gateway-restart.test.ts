@@ -1061,8 +1061,8 @@ describe("restartGatewayViaCli", () => {
   it("deduplicates concurrent restart requests", async () => {
     healthStatuses.push(503, 200, 503, 503, 503, 200, 200, 200);
 
-    const first = restartGatewayViaCli("work", 50, 1);
-    const second = restartGatewayViaCli("work", 50, 1);
+    const first = restartGatewayViaCli("work", 1000, 1);
+    const second = restartGatewayViaCli("work", 1000, 1);
 
     await expect(Promise.all([first, second])).resolves.toEqual([true, true]);
     expect(hermesCliArgsSpy).toHaveBeenCalledTimes(1);
