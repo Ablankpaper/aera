@@ -1,4 +1,6 @@
-import { readFile, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { expect, it, vi } from "vitest";
 
@@ -137,4 +139,65 @@ it("fails closed when the archive helper returns an invalid result", async () =>
       { executablePath: "Aera.exe", helperPath: "helper.js", execute },
     ),
   ).rejects.toThrow(/invalid result/i);
+});
+
+it("passes a bounded deadline to the packaged archive validator", async () => {
+  let executionTimeout: number | undefined;
+  const execute = vi.fn<RuntimeArchiveValidationHelperExecutor>(
+    async (_executable, _arguments_, options) => {
+      executionTimeout = options.timeoutMs;
+      return { stdout: '{"schemaVersion":1,"ok":true}\n', stderr: "" };
+    },
+  );
+
+  await verifyRuntimeArchiveWithHelper(
+    {
+      archivePath: "C:\\runtime\\seed.zip",
+      manifest,
+      maxExtractedBytes: 4096,
+      hostPlatform: "win32",
+    },
+    { executablePath: "Aera.exe", helperPath: "helper.js", execute },
+  );
+
+  expect(executionTimeout).toBe(8 * 60 * 1000);
+});
+
+it("classifies the real child-process deadline as a timeout", async () => {
+  const root = await mkdtemp(join(tmpdir(), "aera-validation-timeout-"));
+  const helperPath = join(root, "wait.mjs");
+  const output = join(root, "events.jsonl");
+  try {
+    await writeFile(helperPath, "setTimeout(() => undefined, 10_000);\n");
+    await expect(
+      verifyRuntimeArchiveWithHelper(
+        {
+          archivePath: "C:\\runtime\\seed.zip",
+          manifest,
+          maxExtractedBytes: 4096,
+          hostPlatform: "win32",
+        },
+        {
+          executablePath: process.execPath,
+          helperPath,
+          timeoutMs: 20,
+          sourceEnvironment: {
+            AGENTERA_RUNTIME_INVENTORY_DIAGNOSTIC_OUTPUT: output,
+          },
+        },
+      ),
+    ).rejects.toThrow(/timed out/i);
+    const events = (await readFile(output, "utf8"))
+      .trim()
+      .split(/\r?\n/u)
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        event: "archive-helper-timeout",
+        timeoutMs: 20,
+      }),
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

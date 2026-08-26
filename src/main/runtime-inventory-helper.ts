@@ -27,7 +27,10 @@ interface RuntimeInventoryHelperRequest {
   hostPlatform: NodeJS.Platform;
 }
 
-function helperDiagnostic(event: string): void {
+function helperDiagnostic(
+  event: string,
+  fields: Readonly<Record<string, number | string | boolean | null>> = {},
+): void {
   const outputPath = process.env[DIAGNOSTIC_OUTPUT]?.trim();
   if (!outputPath || !isAbsolute(outputPath)) return;
   try {
@@ -38,6 +41,7 @@ function helperDiagnostic(event: string): void {
         event,
         timestampMs: Date.now(),
         pid: process.pid,
+        ...fields,
       })}\n`,
       { encoding: "utf8", mode: 0o600 },
     );
@@ -100,6 +104,7 @@ async function main(): Promise<void> {
   );
   helperDiagnostic("inventory-helper-request-complete");
   helperDiagnostic("inventory-walk-hash-start");
+  const startedAt = Date.now();
   const result = await verifyExtractedRuntimeInventoryInProcess(
     request.destination,
     request.manifest,
@@ -107,7 +112,11 @@ async function main(): Promise<void> {
     undefined,
     request.hostPlatform,
   );
-  helperDiagnostic("inventory-walk-hash-complete");
+  helperDiagnostic("inventory-walk-hash-complete", {
+    durationMs: Math.max(0, Date.now() - startedAt),
+    fileCount: result.fileCount,
+    extractedBytes: result.extractedBytes,
+  });
   process.stdout.write(
     `${JSON.stringify({ schemaVersion: 1, ok: true, ...result })}\n`,
   );

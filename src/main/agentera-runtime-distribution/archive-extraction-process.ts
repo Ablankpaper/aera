@@ -71,6 +71,7 @@ function helperTimeoutError(): RuntimeExtractionError {
 function runtimeArchiveExtractionDiagnostic(
   sourceEnvironment: NodeJS.ProcessEnv,
   event: string,
+  fields: Readonly<Record<string, number | string | boolean | null>> = {},
 ): void {
   const outputPath = sourceEnvironment[HELPER_DIAGNOSTIC_OUTPUT]?.trim();
   if (!outputPath || !isAbsolute(outputPath)) return;
@@ -82,6 +83,7 @@ function runtimeArchiveExtractionDiagnostic(
         event,
         timestampMs: Date.now(),
         pid: process.pid,
+        ...fields,
       })}\n`,
       { encoding: "utf8", mode: 0o600 },
     );
@@ -249,6 +251,7 @@ export async function extractRuntimeArchiveWithHelper(
     let executionPromise:
       | Promise<RuntimeArchiveExtractionHelperExecutionResult>
       | undefined;
+    let executionStartedAt = 0;
     let rejectExternalAbort: ((reason: Error) => void) | null = null;
     const externalAbortPromise = options.signal
       ? new Promise<never>((_, reject) => {
@@ -265,7 +268,9 @@ export async function extractRuntimeArchiveWithHelper(
       runtimeArchiveExtractionDiagnostic(
         sourceEnvironment,
         "archive-extraction-helper-spawn-start",
+        { timeoutMs },
       );
+      executionStartedAt = Date.now();
       executionPromise = execute(
         options.executablePath ?? process.execPath,
         [options.helperPath ?? defaultHelperPath(), requestPath],
@@ -297,6 +302,10 @@ export async function extractRuntimeArchiveWithHelper(
       runtimeArchiveExtractionDiagnostic(
         sourceEnvironment,
         "archive-extraction-helper-process-complete",
+        {
+          durationMs: Math.max(0, Date.now() - executionStartedAt),
+          timeoutMs,
+        },
       );
       parseHelperResult(execution.stdout);
       runtimeArchiveExtractionDiagnostic(
@@ -308,16 +317,37 @@ export async function extractRuntimeArchiveWithHelper(
         runtimeArchiveExtractionDiagnostic(
           sourceEnvironment,
           "archive-extraction-helper-timeout",
+          {
+            durationMs: Math.max(
+              0,
+              Date.now() - (executionStartedAt || Date.now()),
+            ),
+            timeoutMs,
+          },
         );
       } else if (externallyAborted) {
         runtimeArchiveExtractionDiagnostic(
           sourceEnvironment,
           "archive-extraction-helper-cancelled",
+          {
+            durationMs: Math.max(
+              0,
+              Date.now() - (executionStartedAt || Date.now()),
+            ),
+            timeoutMs,
+          },
         );
       }
       runtimeArchiveExtractionDiagnostic(
         sourceEnvironment,
         "archive-extraction-helper-process-failed",
+        {
+          durationMs: Math.max(
+            0,
+            Date.now() - (executionStartedAt || Date.now()),
+          ),
+          timeoutMs,
+        },
       );
       if (timedOut) throw helperTimeoutError();
       if (externallyAborted) throw helperAbortError();

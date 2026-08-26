@@ -1,4 +1,6 @@
-import { readFile, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
@@ -238,5 +240,46 @@ describe("isolated Runtime inventory verification", () => {
       ),
     ).rejects.toMatchObject({ name: "AbortError" });
     expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("records bounded inventory timing evidence", async () => {
+    const root = await mkdtemp(join(tmpdir(), "aera-inventory-diagnostic-"));
+    const output = join(root, "events.jsonl");
+    try {
+      await verifyRuntimeInventoryWithHelper(
+        {
+          destination: "C:\\runtime\\staging",
+          manifest,
+          maxExtractedBytes: 4096,
+          hostPlatform: "win32",
+        },
+        {
+          executablePath: "Aera.exe",
+          helperPath: "helper.js",
+          timeoutMs: 20,
+          sourceEnvironment: {
+            AGENTERA_RUNTIME_INVENTORY_DIAGNOSTIC_OUTPUT: output,
+          },
+          execute: async () => ({
+            stdout:
+              '{"schemaVersion":1,"ok":true,"fileCount":0,"extractedBytes":0}\n',
+            stderr: "",
+          }),
+        },
+      );
+      const events = (await readFile(output, "utf8"))
+        .trim()
+        .split(/\r?\n/u)
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          event: "inventory-helper-process-complete",
+          durationMs: expect.any(Number),
+          timeoutMs: 20,
+        }),
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });
