@@ -1144,7 +1144,7 @@ describe("restartGatewayViaCli", () => {
     const first = restartGatewayViaCli("work", 5, 1);
     const second = restartGatewayViaCli(
       "personal",
-      queuedRestartHealthTimeoutMs,
+      1000,
       1,
     );
 
