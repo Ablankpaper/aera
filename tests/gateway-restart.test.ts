@@ -975,7 +975,10 @@ describe("restartGatewayViaCli", () => {
     hermesCliArgsSpy.mockImplementation(() => ["-e", longRunningRestartScript]);
     healthStatuses.push(200, 503, 200);
 
-    await expect(restartGatewayViaCli("work", 50, 1)).resolves.toBe(true);
+    // This assertion covers listener adoption after readiness, not host
+    // scheduler latency. The real child-process fixture needs a bounded
+    // window to publish gateway.pid while the full macOS suite is concurrent.
+    await expect(restartGatewayViaCli("work", 2000, 1)).resolves.toBe(true);
 
     const ownership = JSON.parse(
       readFileSync(
