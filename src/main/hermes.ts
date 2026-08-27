@@ -1193,7 +1193,10 @@ export class TuiGatewayClient {
     }
     if ((explicitResult?.remainingPids.length ?? 0) > 0) {
       const explicitOwnership = explicitResult?.retryOwnership;
-      if (explicitOwnership && !nextRetryOwnerships.includes(explicitOwnership)) {
+      if (
+        explicitOwnership &&
+        !nextRetryOwnerships.includes(explicitOwnership)
+      ) {
         nextRetryOwnerships.push(explicitOwnership);
       }
     }
@@ -4627,6 +4630,7 @@ async function waitForGatewayServing(
   preparedApiServerKey?: string,
   preparedApiServerPort?: number,
   preLaunchPid?: number | null,
+  launchPid?: number | null,
 ): Promise<{
   ready: boolean;
   listenerPid: number | null;
@@ -4637,24 +4641,42 @@ async function waitForGatewayServing(
     // A pid file alone is not evidence: the listener PID must parse, differ
     // from the pre-launch stale pid, and resolve to a live Python process.
     const candidate = readPidFile(profile);
+    const candidateIsPreLaunch =
+      candidate !== null && candidate === (preLaunchPid ?? null);
+    const candidateIsTrackedLaunch =
+      candidate !== null && candidate === (launchPid ?? null);
+    const candidateAlive =
+      candidate !== null && !candidateIsPreLaunch
+        ? pidIsAliveAs(candidate, GATEWAY_IMAGE_PREFIXES)
+        : false;
     const observedListenerEvidence =
-      candidate !== null &&
-      candidate !== preLaunchPid &&
-      pidIsAliveAs(candidate, GATEWAY_IMAGE_PREFIXES)
+      candidateAlive && candidate !== null
         ? readGatewayProcessEvidence(candidate)
         : null;
     const listenerEvidence = isGatewayProcessEvidence(observedListenerEvidence)
       ? observedListenerEvidence
       : null;
     const listenerPid = listenerEvidence === null ? null : candidate;
-    if (
-      listenerPid !== null &&
-      (await isApiServerReady(
+    const apiProbeAttempted = listenerPid !== null;
+    let apiReady = false;
+    if (apiProbeAttempted) {
+      apiReady = await isApiServerReady(
         profile,
         preparedApiServerKey,
         preparedApiServerPort,
-      ))
-    ) {
+      );
+    }
+    gatewayReadinessDiagnostic("poll", {
+      candidatePid: candidate,
+      candidateIsPreLaunch,
+      candidateIsTrackedLaunch,
+      candidateAlive,
+      identityAvailable: observedListenerEvidence !== null,
+      identityValid: listenerEvidence !== null,
+      apiProbeAttempted,
+      apiReady,
+    });
+    if (listenerPid !== null && apiReady) {
       return { ready: true, listenerPid, listenerEvidence };
     }
     if (Date.now() >= deadline) {
@@ -4705,16 +4727,9 @@ async function cleanupGatewayLaunch(
   // would see only the exited wrapper and leave the daemon behind. Adoption
   // still requires a live Python image plus creation identity, and a failed
   // persistence step deliberately leaves the PID unowned/fail-closed.
-  if (
-    !cleanupFailed &&
-    ownership !== null &&
-    ownership.listenerPid === null
-  ) {
+  if (!cleanupFailed && ownership !== null && ownership.listenerPid === null) {
     const latePidEntry = readPidFileEntry(profile);
-    if (
-      latePidEntry !== null &&
-      latePidEntry.pid !== ownership.preLaunchPid
-    ) {
+    if (latePidEntry !== null && latePidEntry.pid !== ownership.preLaunchPid) {
       const lateEvidence = readGatewayProcessEvidence(latePidEntry.pid);
       if (isGatewayProcessEvidence(lateEvidence)) {
         const adopted = adoptGatewayPidFromFile(
@@ -4986,6 +5001,7 @@ export async function startGatewayWithReadiness(
     // An already-running gateway legitimately keeps its existing pid; the
     // stale-pid rejection only applies to a launch this call made.
     startResult.alreadyRunning ? null : preLaunchPid,
+    startResult.alreadyRunning ? null : (launchRef.proc?.pid ?? null),
   );
   gatewayReadinessDiagnostic("wait-complete", {
     ready: serving.ready,
@@ -6105,10 +6121,32 @@ function wrapperTarget(
   ownership: GatewayLaunchOwnershipRecord,
 ): GatewayOwnedProcessTarget | null {
   if (ownership.spawnedPid === null) return null;
+  const hasSpawnedEvidence =
+    ownership.spawnedIdentity !== null && ownership.spawnedImage !== null;
+  const hasSamePidListenerEvidence =
+    ownership.listenerPid === ownership.spawnedPid &&
+    ownership.listenerIdentity !== null &&
+    ownership.listenerImage !== null;
+  // Windows can keep the Gateway in the foreground, so gateway.pid names the
+  // exact ChildProcess PID. If the cold spawn-time CIM read missed its bounded
+  // window but readiness later captured and durably adopted that same PID,
+  // the listener proof is also valid proof for the tracked process. This does
+  // not authorize a cross-PID hand-off: different wrapper/listener PIDs retain
+  // their independent evidence and every signal still re-reads the identity.
+  const identity = hasSpawnedEvidence
+    ? ownership.spawnedIdentity
+    : hasSamePidListenerEvidence
+      ? ownership.listenerIdentity
+      : ownership.spawnedIdentity;
+  const image = hasSpawnedEvidence
+    ? ownership.spawnedImage
+    : hasSamePidListenerEvidence
+      ? ownership.listenerImage
+      : ownership.spawnedImage;
   return {
     pid: ownership.spawnedPid,
-    identity: ownership.spawnedIdentity,
-    image: ownership.spawnedImage,
+    identity,
+    image,
     kind: "wrapper",
   };
 }
@@ -7036,6 +7074,7 @@ async function restartGatewayViaCliOnce(
       prepared.key,
       prepared.port,
       preLaunchPid,
+      proc.pid,
     );
     const processExitedWithError =
       processError !== null || (closeCode !== null && closeCode !== 0);

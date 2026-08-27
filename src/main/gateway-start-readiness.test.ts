@@ -238,6 +238,7 @@ import {
   configureGatewayProcessOwnership,
   isGatewayRunning,
   startGatewayWithReadiness,
+  stopAeraOwnedGateways,
   stopHealthPolling,
 } from "./hermes";
 import { GatewayProcessOwnershipLedger } from "./gateway-process-ownership";
@@ -409,6 +410,110 @@ describe("startGatewayWithReadiness", () => {
     ]);
   });
 
+  it("uses later same-PID listener proof to close a launch whose spawn proof was temporarily unavailable", async () => {
+    const child = spawnNextWithPidFile(process.pid, process.pid);
+    expectListenerAlive();
+    let evidenceReads = 0;
+    processEvidenceRef.value.mockImplementation((pid: number) => {
+      evidenceReads += 1;
+      return evidenceReads === 1
+        ? (null as never)
+        : { identity: `test-created-${pid}`, image: "python3" };
+    });
+    configureGatewayProcessOwnership(TEST_OWNERSHIP_ROOT);
+
+    const started = await startGatewayWithReadiness(undefined, {
+      key: "generated-internal-token",
+      port: 8642,
+    });
+
+    expect(started.ready).toBe(true);
+    expect(
+      JSON.parse(
+        readFileSync(
+          `${TEST_OWNERSHIP_ROOT}/gateway-process-ownership.json`,
+          "utf8",
+        ),
+      ).entries,
+    ).toEqual([
+      expect.objectContaining({
+        spawnedPid: process.pid,
+        spawnedIdentity: null,
+        spawnedImage: null,
+        listenerPid: process.pid,
+        listenerIdentity: `test-created-${process.pid}`,
+        listenerImage: "python3",
+      }),
+    ]);
+
+    terminateRef.value.mockImplementationOnce(async () => {
+      pidAliveRef.value.mockReturnValue(false);
+      Object.defineProperty(child, "exitCode", {
+        configurable: true,
+        value: 0,
+      });
+      return { forced: false, remainingPids: [] };
+    });
+
+    await expect(stopAeraOwnedGateways()).resolves.toBeUndefined();
+    expect(terminateRef.value).toHaveBeenCalledWith(
+      child,
+      expect.objectContaining({ verifyRootOwnership: expect.any(Function) }),
+    );
+    expect(existsSync(`${TEST_HOME}/gateway.pid`)).toBe(false);
+    expect(
+      JSON.parse(
+        readFileSync(
+          `${TEST_OWNERSHIP_ROOT}/gateway-process-ownership.json`,
+          "utf8",
+        ),
+      ).entries,
+    ).toEqual([]);
+  });
+
+  it("uses later same-PID listener proof to clean a launch whose API never becomes ready", async () => {
+    httpState.statusCode.value = 503;
+    const child = spawnNextWithPidFile(process.pid, process.pid);
+    expectListenerAlive();
+    let evidenceReads = 0;
+    processEvidenceRef.value.mockImplementation((pid: number) => {
+      evidenceReads += 1;
+      return evidenceReads === 1
+        ? (null as never)
+        : { identity: `test-created-${pid}`, image: "python3" };
+    });
+    configureGatewayProcessOwnership(TEST_OWNERSHIP_ROOT);
+    terminateRef.value.mockImplementationOnce(async () => {
+      pidAliveRef.value.mockReturnValue(false);
+      Object.defineProperty(child, "exitCode", {
+        configurable: true,
+        value: 0,
+      });
+      return { forced: false, remainingPids: [] };
+    });
+
+    const promise = startGatewayWithReadiness(
+      undefined,
+      { key: "generated-internal-token", port: 8642 },
+      { readyTimeoutMs: 200, pollMs: 20 },
+    );
+    await vi.advanceTimersByTimeAsync(500);
+    const result = await promise;
+
+    expect(result.success).toBe(false);
+    expect(result.ready).toBe(false);
+    expect(result.running).toBe(false);
+    expect(result.diagnostics?.termination).toEqual({
+      forced: false,
+      remainingPids: [],
+    });
+    expect(terminateRef.value).toHaveBeenCalledWith(
+      child,
+      expect.objectContaining({ verifyRootOwnership: expect.any(Function) }),
+    );
+    expect(terminatePidRef.value).not.toHaveBeenCalled();
+  });
+
   it("warms the dashboard gateway only after the primary gateway is ready", async () => {
     spawnNextWithPidFile(4322, 9877);
     expectListenerAlive();
@@ -446,21 +551,19 @@ describe("startGatewayWithReadiness", () => {
     configureGatewayProcessOwnership(TEST_OWNERSHIP_ROOT);
     const warmDashboard = vi.fn();
     const ownershipChecks: boolean[] = [];
-    terminateRef.value.mockImplementationOnce(
-      async (...args: unknown[]) => {
-        const options = args[1];
-        const verifyRootOwnership = (
-          options as { verifyRootOwnership: (pid: number) => boolean }
-        ).verifyRootOwnership;
-        ownershipChecks.push(verifyRootOwnership(process.pid));
-        processEvidenceRef.value.mockReturnValueOnce({
-          identity: `test-created-${process.pid}`,
-          image: "node",
-        });
-        ownershipChecks.push(verifyRootOwnership(process.pid));
-        return { forced: false, remainingPids: [] };
-      },
-    );
+    terminateRef.value.mockImplementationOnce(async (...args: unknown[]) => {
+      const options = args[1];
+      const verifyRootOwnership = (
+        options as { verifyRootOwnership: (pid: number) => boolean }
+      ).verifyRootOwnership;
+      ownershipChecks.push(verifyRootOwnership(process.pid));
+      processEvidenceRef.value.mockReturnValueOnce({
+        identity: `test-created-${process.pid}`,
+        image: "node",
+      });
+      ownershipChecks.push(verifyRootOwnership(process.pid));
+      return { forced: false, remainingPids: [] };
+    });
 
     const promise = startGatewayWithReadiness(
       undefined,
@@ -526,6 +629,7 @@ describe("startGatewayWithReadiness", () => {
     const events = diagnostics.join("\n");
     for (const event of [
       "wait-start",
+      "poll",
       "wait-complete",
       "cleanup-plan",
       "cleanup-target-start",
@@ -536,6 +640,8 @@ describe("startGatewayWithReadiness", () => {
     expect(events).not.toContain(TEST_HOME);
     expect(events).not.toContain(invocation.python);
     expect(events).not.toContain("generated-internal-token");
+    expect(events).toContain('"identityAvailable":false');
+    expect(events).toContain('"apiProbeAttempted":false');
   });
 
   it("still cleans up the listener when the wrapper exits before the deadline", async () => {

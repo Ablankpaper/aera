@@ -107,7 +107,13 @@ export function readProcessIdentityEvidence(
         ["-NoProfile", "-NonInteractive", "-Command", script],
         {
           encoding: "utf8",
-          timeout: 1_000,
+          // Starting PowerShell plus the first CIM provider activation can
+          // exceed one second on a cold packaged Windows runner (Defender and
+          // the Runtime extraction may still be warming).  A timeout here is
+          // an evidence miss, not a process miss: keep the query bounded, but
+          // give it enough budget to return the creation token needed by the
+          // readiness/ownership gate.
+          timeout: 5_000,
           windowsHide: true,
           stdio: ["ignore", "pipe", "ignore"],
         },
