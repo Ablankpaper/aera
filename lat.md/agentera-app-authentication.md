@@ -184,7 +184,7 @@ The retained legacy guest edge still requires the explicit guest-capable policy 
 
 The first Aera use of a running Profile Gateway that predates the ledger performs a bounded restart, and only the replacement receives a launch record.
 
-[[src/main/hermes.ts#startGatewayWithRecovery]] never adopts the unverifiable PID. After the replacement is recorded, sign-out, account switching, and shutdown can reap that exact Aera-owned Gateway.
+[[src/main/hermes.ts#startGatewayWithRecovery]] never adopts the unverifiable PID. After the replacement is recorded, sign-out, account switching, and shutdown can reap that exact Aera-owned Gateway. On Windows the takeover's snapshot and taskkill tooling keeps the same platform budget floor as the owned shutdown path; a caller's smaller stop budget never compresses the evidence capture that gates the signal.
 
 #### Invalid ownership blocks takeover
 
