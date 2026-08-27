@@ -71,6 +71,19 @@ function helperTimeoutError(): RuntimeExtractionError {
   );
 }
 
+function isNativeTimeoutError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const record = error as {
+    code?: unknown;
+    killed?: unknown;
+    signal?: unknown;
+  };
+  return (
+    record.killed === true &&
+    (record.signal === "SIGTERM" || record.code === "ETIMEDOUT")
+  );
+}
+
 function runtimeArchiveProcessDiagnostic(
   sourceEnvironment: NodeJS.ProcessEnv,
   event: string,
@@ -302,6 +315,12 @@ export async function verifyRuntimeArchiveWithHelper(
         },
       );
     } catch (error) {
+      // Node's execFile can settle its native timeout callback just before
+      // the parent Promise.race timer. Preserve the timeout contract when
+      // that platform-specific ordering exposes the killed child first.
+      if (!externallyAborted && isNativeTimeoutError(error)) {
+        timedOut = true;
+      }
       const fields = {
         durationMs: Math.max(
           0,

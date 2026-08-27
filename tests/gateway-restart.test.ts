@@ -1233,8 +1233,14 @@ describe("restartGatewayViaCli", () => {
   });
 
   it("falls back to a native restart when a normal start does not become healthy", async () => {
-    hermesCliArgsSpy.mockImplementation(() => ["-e", restartScript]);
-    healthStatuses.push(503, 503, 200);
+    hermesCliArgsSpy
+      .mockImplementationOnce(() => ["-e", "setInterval(() => {}, 1000);"])
+      .mockImplementationOnce(() => ["-e", restartScript]);
+    // Keep the first launch from publishing gateway.pid at all. This makes
+    // the normal-start timeout deterministic on every host scheduler, so the
+    // single 503 is consumed only by the native stop check and the second
+    // launch's first readiness probe sees the 200.
+    healthStatuses.push(503, 200);
 
     await expect(
       // This assertion covers the recovery transition, not host scheduler

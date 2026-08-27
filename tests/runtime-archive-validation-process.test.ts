@@ -201,3 +201,30 @@ it("classifies the real child-process deadline as a timeout", async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+it("classifies a native execFile timeout rejection as a timeout", async () => {
+  const execute = vi.fn<RuntimeArchiveValidationHelperExecutor>(async () => {
+    const error = Object.assign(new Error("Command failed"), {
+      killed: true,
+      signal: "SIGTERM",
+    });
+    throw error;
+  });
+
+  await expect(
+    verifyRuntimeArchiveWithHelper(
+      {
+        archivePath: "C:\\runtime\\seed.zip",
+        manifest,
+        maxExtractedBytes: 4096,
+        hostPlatform: "win32",
+      },
+      {
+        executablePath: "Aera.exe",
+        helperPath: "helper.js",
+        timeoutMs: 20,
+        execute,
+      },
+    ),
+  ).rejects.toThrow(/timed out/i);
+});
