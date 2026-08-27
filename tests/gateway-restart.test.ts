@@ -1240,7 +1240,7 @@ describe("restartGatewayViaCli", () => {
       // This assertion covers the recovery transition, not host scheduler
       // latency. Give the real child-process fixture enough time to publish
       // gateway.pid when the full Vitest suite is running concurrently.
-      startGatewayWithRecovery("work", 5, 50, 15000, 2000),
+      startGatewayWithRecovery("work", 5, 50, 15000, 5000),
     ).resolves.toBe(true);
 
     expect(hermesCliArgsSpy).toHaveBeenNthCalledWith(1, [
