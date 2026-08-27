@@ -6085,9 +6085,15 @@ async function stopLegacyGatewayForTakeover(
         gatewayProcessEvidenceStillMatches(pid, expectedEvidence),
       ...(process.platform === "win32"
         ? {
-            commandTimeoutMs: Math.max(1, Math.min(timeoutMs, 3_000)),
-            snapshotTimeoutMs: Math.max(1, Math.min(timeoutMs, 3_000)),
-            snapshotTotalBudgetMs: Math.max(1, Math.min(timeoutMs, 6_000)),
+            // The snapshot/taskkill tooling budget is a platform property,
+            // not a caller property: one CIM attempt plus one WMI fallback
+            // cannot complete inside an arbitrarily small stop budget on a
+            // loaded host, and a timed-out snapshot fail-closes the takeover
+            // before taskkill ever runs. Match the same floor the owned
+            // shutdown path uses. Every fail-closed check above is unchanged.
+            commandTimeoutMs: 3_000,
+            snapshotTimeoutMs: 3_000,
+            snapshotTotalBudgetMs: 6_000,
             diagnosticProfileKey: profileKey(profile),
           }
         : {}),

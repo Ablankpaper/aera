@@ -453,6 +453,59 @@ describe("ordinary gateway shutdown lifecycle", () => {
     }
   });
 
+  // A legacy takeover on Windows must run its CIM/WMI snapshot and taskkill
+  // through the platform tooling budget (3s/3s/6s, the same floor the owned
+  // shutdown path uses) — never compressed by the caller's stop budget. On a
+  // loaded CI host a 1s snapshot budget makes both snapshot strategies time
+  // out, which fail-closes the takeover before taskkill even runs.
+  it("keeps the Windows legacy-takeover tooling budget above the platform floor", async () => {
+    const platform = vi
+      .spyOn(process, "platform", "get")
+      .mockReturnValue("win32");
+    const legacyPid = 9_000_001;
+    const replacementPid = 9_000_002;
+    mkdirSync(`${TEST_HOME}/profiles/work`, { recursive: true });
+    writeFileSync(
+      `${TEST_HOME}/profiles/work/gateway.pid`,
+      JSON.stringify({ pid: legacyPid }),
+    );
+    fakeAlivePids.value.add(legacyPid);
+    fakeAlivePids.value.add(replacementPid);
+    const child = fakeChildProcess(replacementPid);
+    spawnRef.value.mockImplementation(() => {
+      writeFileSync(
+        `${TEST_HOME}/profiles/work/gateway.pid`,
+        JSON.stringify({ pid: replacementPid }),
+      );
+      return child;
+    });
+
+    try {
+      configureGatewayManagedConfiguration({
+        modelMutationPort: { mutate: vi.fn() },
+      });
+      configureGatewayProcessOwnership(TEST_OWNERSHIP_ROOT);
+
+      const recovery = startGatewayWithRecovery("work", 100, 50, 0, 100, 100);
+      await vi.advanceTimersByTimeAsync(10_000);
+      // The restart's final outcome is not the subject here — the takeover's
+      // tooling budget is. Swallow the result after the evidence is in.
+      await recovery.catch(() => undefined);
+
+      expect(terminatePidRef.value).toHaveBeenCalledWith(
+        legacyPid,
+        expect.objectContaining({
+          commandTimeoutMs: 3_000,
+          snapshotTimeoutMs: 3_000,
+          snapshotTotalBudgetMs: 6_000,
+        }),
+      );
+    } finally {
+      child.emit("close", 0, null);
+      platform.mockRestore();
+    }
+  });
+
   // @lat: [[agentera-runtime-distribution#Desktop TUI backend lifecycle#Awaited Electron quit barrier]]
   it("awaits exact ordinary gateway process-tree termination before resolving", async () => {
     const child = fakeChildProcess(process.pid);
