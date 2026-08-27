@@ -102,7 +102,10 @@ jobs:
             "check (windows-latest)",
             "windows-model-recovery",
           ]);
-          const allowedSkippedJobs = new Set(["windows-process-tree-diagnostic"]);
+          const allowedSkippedJobs = new Set([
+            "windows-process-tree-diagnostic",
+            "windows-serve-help-diagnostic",
+          ]);
           for (const job of run.jobs) {
             const executed = job.steps?.filter((step) => step.conclusion !== "skipped") ?? [];
             if (
