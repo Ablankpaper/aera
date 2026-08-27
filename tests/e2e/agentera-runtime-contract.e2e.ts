@@ -593,40 +593,33 @@ test("packaged Electron runs its installed locked Runtime and advertises Agent r
     clearInterval(installHeartbeat);
   }
   expect(install).toEqual({ success: true });
-  let runtimeStateAttempt = 0;
-  let previousRuntimeStateSnapshot = "";
-  await expect
-    .poll(async () => {
-      runtimeStateAttempt += 1;
-      const state = await page?.evaluate(() =>
-        window.agenteraRuntimeDistribution.getState(),
-      );
-      const snapshot = state
-        ? [
-            state.phase,
-            state.currentVersion === lock.runtime_version,
-            state.currentSourceCommit === lock.source_commit,
-            state.lastErrorCode,
-          ].join(":")
-        : "unavailable";
-      if (snapshot !== previousRuntimeStateSnapshot) {
-        previousRuntimeStateSnapshot = snapshot;
-        runtimeContractDiagnostic("runtime-state-probe", {
-          attempt: runtimeStateAttempt,
-          phase: state?.phase ?? null,
-          currentVersionMatches: state?.currentVersion === lock.runtime_version,
-          currentSourceCommitMatches:
-            state?.currentSourceCommit === lock.source_commit,
-          lastErrorCode: state?.lastErrorCode ?? null,
-        });
-      }
-      return state;
-    })
-    .toMatchObject({
-      phase: "current",
-      currentVersion: lock.runtime_version,
-      currentSourceCommit: lock.source_commit,
-    });
+  // `start-install` returns only after the main process has synchronized its
+  // long-lived manager and verified the exact installed version. A second
+  // polling loop can overlap the renderer's queued progress/state messages on
+  // heavily loaded hosted macOS runners: the first getState call then waits
+  // behind that renderer work even though the authoritative install result is
+  // already complete. Keep one independently bounded state read as evidence,
+  // rather than retrying a potentially still-in-flight IPC call every 100ms.
+  runtimeContractDiagnostic("runtime-state-probe-start", {
+    timeoutMs: 120_000,
+  });
+  const runtimeState = await withDiagnosticTimeout(
+    () => page!.evaluate(() => window.agenteraRuntimeDistribution.getState()),
+    120_000,
+  );
+  runtimeContractDiagnostic("runtime-state-probe-complete", {
+    phase: runtimeState?.phase ?? null,
+    currentVersionMatches:
+      runtimeState?.currentVersion === lock.runtime_version,
+    currentSourceCommitMatches:
+      runtimeState?.currentSourceCommit === lock.source_commit,
+    lastErrorCode: runtimeState?.lastErrorCode ?? null,
+  });
+  expect(runtimeState).toMatchObject({
+    phase: "current",
+    currentVersion: lock.runtime_version,
+    currentSourceCommit: lock.source_commit,
+  });
 
   runtimeContractDiagnostic("installed-contract-inspection-start");
   const installed = await withDiagnosticTimeout(
