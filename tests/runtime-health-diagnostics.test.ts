@@ -111,6 +111,47 @@ it("records each packaged health probe and cleanup boundary only in diagnostic m
   ]);
 });
 
+it("captures the serve-help import waterfall in diagnostic mode only", async () => {
+  const setup = await healthHarness();
+  process.env.AGENTERA_E2E_DIAGNOSTICS = "1";
+  process.env.AGENTERA_E2E_RUNTIME_CONTRACT_DIAGNOSTIC_OUTPUT = setup.output;
+  const capturedArgs: string[][] = [];
+
+  await runIsolatedRuntimeHealthCheck({
+    runtimeRoot: setup.runtimeRoot,
+    manifest: setup.manifest,
+    runner: async (_executable, args) => {
+      capturedArgs.push([...args]);
+      return { stdout: "0.20.0-agentera.5\n", stderr: "" };
+    },
+  });
+
+  expect(capturedArgs).toHaveLength(3);
+  // Probe 2 (serve-help) carries the import waterfall so a stalled launch
+  // shows the exact import it never completed; the other probes stay plain.
+  expect(capturedArgs[1]).toEqual(expect.arrayContaining(["-X", "importtime"]));
+  expect(capturedArgs[0]).not.toContain("-X");
+  expect(capturedArgs[2]).not.toContain("-X");
+});
+
+it("keeps the serve-help probe free of import tracing outside diagnostic mode", async () => {
+  const setup = await healthHarness();
+  const capturedArgs: string[][] = [];
+
+  await runIsolatedRuntimeHealthCheck({
+    runtimeRoot: setup.runtimeRoot,
+    manifest: setup.manifest,
+    runner: async (_executable, args) => {
+      capturedArgs.push([...args]);
+      return { stdout: "0.20.0-agentera.5\n", stderr: "" };
+    },
+  });
+
+  expect(capturedArgs).toHaveLength(3);
+  expect(capturedArgs[1]).not.toContain("-X");
+  expect(capturedArgs[1]).not.toContain("importtime");
+});
+
 it("records a bounded redacted health failure without changing the public error", async () => {
   const setup = await healthHarness();
   process.env.AGENTERA_E2E_DIAGNOSTICS = "1";

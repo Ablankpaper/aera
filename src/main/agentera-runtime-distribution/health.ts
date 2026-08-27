@@ -8,7 +8,9 @@ import type { RuntimeManifest } from "./manifest";
 const POSIX_HEALTH_TIMEOUT_MS = 45_000;
 const WINDOWS_HEALTH_TIMEOUT_MS = 120_000;
 const HEALTH_MAX_OUTPUT_BYTES = 1024 * 1024;
-const HEALTH_DIAGNOSTIC_MAX_STDERR_CHARS = 512;
+// The recorded output tail must hold enough of an `-X importtime` waterfall
+// (each line ~80 chars) to show exactly which import never completed.
+const HEALTH_DIAGNOSTIC_MAX_STDERR_CHARS = 2048;
 const HEALTH_DIAGNOSTIC_OUTPUT =
   "AGENTERA_E2E_RUNTIME_CONTRACT_DIAGNOSTIC_OUTPUT";
 const REQUIRED_IMPORTS = [
@@ -320,6 +322,16 @@ function guardedImportScript(): string {
   ].join(";");
 }
 
+function serveHelpProbeArgs(module: string): readonly string[] {
+  const script = guardedModuleScript(module, ["serve", "--help"]);
+  // Diagnostic builds trace the import waterfall onto stderr so a stalled
+  // launch records the exact import it never completed. The flag changes
+  // only stderr noise; the probed behavior and stdout contract are identical.
+  return process.env.AGENTERA_E2E_DIAGNOSTICS === "1"
+    ? ["-I", "-B", "-X", "importtime", "-c", script]
+    : ["-I", "-B", "-c", script];
+}
+
 // @lat: [[agentera-self-evolution#Runtime isolation]]
 export async function runIsolatedRuntimeHealthCheck({
   runtimeRoot,
@@ -388,12 +400,7 @@ export async function runIsolatedRuntimeHealthCheck({
       },
       {
         name: "serve-help",
-        args: [
-          "-I",
-          "-B",
-          "-c",
-          guardedModuleScript(manifest.entrypoints.module, ["serve", "--help"]),
-        ],
+        args: serveHelpProbeArgs(manifest.entrypoints.module),
       },
       { name: "imports", args: ["-I", "-B", "-c", guardedImportScript()] },
     ];
