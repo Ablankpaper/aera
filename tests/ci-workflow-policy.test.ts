@@ -72,7 +72,7 @@ describe("CI workflow policy", () => {
       required: true,
       default: "full",
       type: "choice",
-      options: ["full", "windows-process-tree-diagnostic"],
+      options: ["full", "windows-process-tree-diagnostic", "windows-serve-help-diagnostic"],
     });
     expect(workflow.jobs?.check?.if).toBe(
       "github.event_name != 'workflow_dispatch' || inputs.mode == 'full'",
@@ -113,5 +113,16 @@ describe("CI workflow policy", () => {
         run: "npm test -- src/main/process-tree.test.ts tests/gateway-restart.test.ts src/main/tui-gateway-lifecycle.test.ts src/main/gateway-shutdown-lifecycle.test.ts --maxWorkers=1 --testTimeout=20000 --reporter=verbose",
       },
     ]);
+
+    const serveHelp = workflow.jobs?.["windows-serve-help-diagnostic"];
+    expect(serveHelp).toMatchObject({
+      if: "github.event_name == 'workflow_dispatch' && inputs.mode == 'windows-serve-help-diagnostic'",
+      name: "windows-serve-help-diagnostic",
+      "runs-on": "windows-latest",
+    });
+    // Dispatch-only and credential-free: no environment, no secrets, and no
+    // release/deploy steps can follow from a diagnostic run.
+    expect(serveHelp?.environment).toBeUndefined();
+    expect(JSON.stringify(serveHelp?.steps)).not.toContain("secrets.");
   });
 });

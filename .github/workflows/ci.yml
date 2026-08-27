@@ -18,6 +18,7 @@ on:
         options:
           - full
           - windows-process-tree-diagnostic
+          - windows-serve-help-diagnostic
 
 permissions:
   contents: read
@@ -206,3 +207,50 @@ jobs:
           --maxWorkers=1
           --testTimeout=20000
           --reporter=verbose
+
+  windows-serve-help-diagnostic:
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'windows-serve-help-diagnostic'
+    name: windows-serve-help-diagnostic
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # The prepare script and the diagnostic runner are Node-stdlib only;
+      # an npm ci here would add minutes without changing either tool.
+      - name: Prepare packaged Runtime seed
+        run: npm run prepare:runtime-seed -- --platform windows --arch x64
+
+      - name: Extract packaged Runtime seed
+        shell: pwsh
+        run: |
+          $archive = Get-ChildItem resources/agentera-runtime-seed/*.zip | Select-Object -First 1
+          if ($null -eq $archive) { throw "Runtime seed archive not found" }
+          $manifest = Get-ChildItem resources/agentera-runtime-seed/*.manifest.json | Select-Object -First 1
+          if ($null -eq $manifest) { throw "Runtime seed manifest not found" }
+          $dest = Join-Path $env:RUNNER_TEMP "runtime-seed-extract"
+          Expand-Archive -LiteralPath $archive.FullName -DestinationPath $dest -Force
+          "SEED_EXTRACT_ROOT=$dest" >> $env:GITHUB_ENV
+          "SEED_MANIFEST=$($manifest.FullName)" >> $env:GITHUB_ENV
+
+      - name: Diagnose the serve --help launch path
+        run: >-
+          node scripts/diagnose-windows-serve-help.mjs
+          --runtime-root "$env:SEED_EXTRACT_ROOT"
+          --manifest "$env:SEED_MANIFEST"
+          --output "$env:RUNNER_TEMP/serve-help-diagnostic.jsonl"
+
+      - name: Upload serve-help diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-serve-help-diagnostic
+          path: ${{ runner.temp }}/serve-help-diagnostic.jsonl
+          if-no-files-found: warn
+          retention-days: 14
