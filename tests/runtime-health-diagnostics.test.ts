@@ -1,11 +1,12 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { afterEach, expect, it } from "vitest";
 
 import {
   RuntimeHealthError,
+  type RuntimeHealthCommandLifecycleEvent,
   runIsolatedRuntimeHealthCheck,
 } from "../src/main/agentera-runtime-distribution/health";
 import {
@@ -212,3 +213,140 @@ it("records a bounded redacted health failure without changing the public error"
   expect(serialized).not.toContain("sk-private-secret");
   expect(serialized).not.toContain(setup.runtimeRoot);
 });
+
+// @lat: [[agentera-runtime-distribution#Release gate#Packaged live Runtime contract#Health child-process lifecycle evidence]]
+it("records the child timeout, exit, stream close, and callback boundaries", async () => {
+  const setup = await healthHarness();
+  process.env.AGENTERA_E2E_DIAGNOSTICS = "1";
+  process.env.AGENTERA_E2E_RUNTIME_CONTRACT_DIAGNOSTIC_OUTPUT = setup.output;
+
+  const timeoutError = Object.assign(new Error("health probe timed out"), {
+    code: "ETIMEDOUT",
+    killed: true,
+    signal: "SIGTERM",
+    stdout: "",
+    stderr: "",
+  });
+  let probe = 0;
+
+  await expect(
+    runIsolatedRuntimeHealthCheck({
+      runtimeRoot: setup.runtimeRoot,
+      manifest: setup.manifest,
+      runner: async (_executable, _args, options) => {
+        probe += 1;
+        if (probe !== 2) {
+          return { stdout: "0.20.0-agentera.5\n", stderr: "" };
+        }
+        const emit = (
+          options as {
+            onLifecycle?: (event: RuntimeHealthCommandLifecycleEvent) => void;
+          }
+        ).onLifecycle;
+        emit?.({ type: "spawn", pid: 7002 });
+        emit?.({ type: "timeout", pid: 7002, childAlive: true, killed: true });
+        emit?.({ type: "exit", pid: 7002, code: null, signal: "SIGTERM" });
+        emit?.({ type: "stderr-close", pid: 7002 });
+        emit?.({ type: "close", pid: 7002, code: null, signal: "SIGTERM" });
+        emit?.({
+          type: "callback",
+          pid: 7002,
+          code: "ETIMEDOUT",
+          signal: "SIGTERM",
+          childAlive: false,
+          childExited: true,
+          childClosed: true,
+          killed: true,
+        });
+        throw timeoutError;
+      },
+    }),
+  ).rejects.toBeInstanceOf(RuntimeHealthError);
+
+  const events = await diagnosticEvents(setup.output);
+  const childEvents = events.filter((entry) =>
+    String(entry.event).startsWith("health-probe-child-"),
+  );
+  expect(childEvents.map((entry) => entry.event)).toEqual([
+    "health-probe-child-spawn",
+    "health-probe-child-timeout",
+    "health-probe-child-exit",
+    "health-probe-child-stderr-close",
+    "health-probe-child-close",
+    "health-probe-child-callback",
+  ]);
+  expect(childEvents[0]).toMatchObject({
+    probe: 2,
+    name: "serve-help",
+    childPid: 7002,
+  });
+  expect(childEvents[1]).toMatchObject({
+    childPid: 7002,
+    childAlive: true,
+    timedOut: true,
+  });
+  expect(childEvents.at(-1)).toMatchObject({
+    childPid: 7002,
+    callbackErrorCode: "ETIMEDOUT",
+    childAlive: false,
+    childExited: true,
+    childClosed: true,
+  });
+});
+
+const realRuntimeRoot = process.env.AERA_RUNTIME_HEALTH_ROOT?.trim();
+const realManifestPath = process.env.AERA_RUNTIME_HEALTH_MANIFEST?.trim();
+const realDiagnosticOutput =
+  process.env.AERA_RUNTIME_HEALTH_DIAGNOSTIC_OUTPUT?.trim();
+
+if (realRuntimeRoot && realManifestPath && realDiagnosticOutput) {
+  // @lat: [[agentera-runtime-distribution#Release gate#Packaged live Runtime contract#Health child-process lifecycle evidence#Windows real-runtime diagnostic]]
+  it("records lifecycle evidence for the extracted Windows Runtime health path", async () => {
+    process.env.AGENTERA_E2E_DIAGNOSTICS = "1";
+    process.env.AGENTERA_E2E_RUNTIME_CONTRACT_DIAGNOSTIC_OUTPUT =
+      realDiagnosticOutput;
+    const manifest = parseRuntimeManifest(await readFile(realManifestPath));
+    const timeoutValue = Number(
+      process.env.AERA_RUNTIME_HEALTH_TIMEOUT_MS ?? 120_000,
+    );
+    const timeoutMs =
+      Number.isSafeInteger(timeoutValue) && timeoutValue > 0
+        ? timeoutValue
+        : 120_000;
+    let failureName: string | null = null;
+    try {
+      await runIsolatedRuntimeHealthCheck({
+        runtimeRoot: realRuntimeRoot,
+        manifest,
+        sandboxParent: join(dirname(realDiagnosticOutput), "health-sandbox"),
+        timeoutMs,
+      });
+    } catch (error) {
+      // This is a diagnostic lane: preserve the probe timeline even when the
+      // extracted Runtime reproduces the candidate failure.
+      failureName = error instanceof Error ? error.name : "unknown";
+    }
+
+    const events = await diagnosticEvents(realDiagnosticOutput);
+    const childEvents = events.filter((entry) =>
+      String(entry.event).startsWith("health-probe-child-"),
+    );
+    expect(events.some((entry) => entry.event === "health-check-start")).toBe(
+      true,
+    );
+    expect(childEvents.length).toBeGreaterThan(0);
+    expect(
+      childEvents.every(
+        (entry) =>
+          entry.childPid === null ||
+          (typeof entry.childPid === "number" && entry.childPid > 0),
+      ),
+    ).toBe(true);
+    console.log(
+      `[runtime-health-diagnostic] ${JSON.stringify({
+        outcome: failureName ?? "healthy",
+        childEvents: childEvents.length,
+      })}`,
+    );
+  });
+}

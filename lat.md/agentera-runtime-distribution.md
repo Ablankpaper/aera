@@ -246,6 +246,20 @@ The packaged contract has a dedicated bounded budget that includes first-install
 
 [[src/main/agentera-runtime-distribution/health.ts#runIsolatedRuntimeHealthCheck]] keeps every offline version, command-surface, and required-import probe fail-closed. Windows receives a bounded 120-second cold-start allowance because Defender can keep a newly extracted 14k-entry Runtime busy after inventory verification; macOS and Linux remain bounded at 45 seconds, and explicit test timeouts still override either platform default. Diagnostic builds run the server-help probe with `-X importtime`, so a stalled launch records the exact import it never completed in the bounded, path-free stderr tail; the flag only adds stderr noise and never changes the probed behavior or the stdout contract.
 
+#### Health child-process lifecycle evidence
+
+When diagnostics are enabled, each isolated health probe records its child lifecycle and timeout state so a packaged stall can be classified from evidence rather than timing assumptions.
+
+The bounded JSONL sequence records the child PID, spawn, timeout/liveness, exit, stdout/stderr stream closure, and final callback boundaries. It also records whether the callback arrived after the timeout and whether the child had exited while a stream remained open; this distinguishes a live child from inherited-handle callback lag. The observer is diagnostic-only and does not alter the production timeout, command, or cleanup semantics.
+
+[[src/main/agentera-runtime-distribution/health.ts#runIsolatedRuntimeHealthCheck]] passes the observer only when the explicit packaged diagnostic environment is active. [[tests/runtime-health-diagnostics.test.ts]] uses deterministic lifecycle events to cover the timeout-to-callback boundary without relying on operating-system process timing.
+
+##### Windows real-runtime diagnostic
+
+The dispatch-only Windows health lane runs the exact health runner against one freshly extracted signed Seed and preserves its JSONL lifecycle evidence; it reports a reproduced health failure without turning that diagnostic into a release gate.
+
+The lane uses the same `-I -B` probes and platform timeout as the installer, so a direct Node result can be compared with the packaged Electron result. A child that exits before its stream/callback boundary points to inherited-handle delay; a live child at timeout points to the Runtime or parent-process launch itself. The lane never changes readiness, timeout, ownership, or release state.
+
 On packaged Windows, ZIP extraction runs in the credential-free `ELECTRON_RUN_AS_NODE` archive-extraction helper outside the Electron main process. The parent independently verifies the signed manifest, archive size, and archive SHA-256; the archive-validation helper performs the structural inventory check against that signed manifest, and the parent performs the complete post-extraction inventory/hash verification. Each helper receives only absolute paths and the minimum manifest/request data, and returns a strict `{schemaVersion:1,ok:true}` result. Archive validation, extraction, and final inventory helpers each have an independent eight-minute deadline with bounded timeout diagnostics, so a filesystem/Defender stall becomes a recoverable install failure instead of leaving the renderer and Electron process waiting indefinitely. Development and POSIX paths retain the direct extractor.
 
 ## Independent verification

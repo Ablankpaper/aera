@@ -19,6 +19,7 @@ on:
           - full
           - windows-process-tree-diagnostic
           - windows-managed-gateway-diagnostic
+          - windows-runtime-health-diagnostic
 
 permissions:
   contents: read
@@ -273,3 +274,63 @@ jobs:
             ${{ runner.temp }}/controlled-gateway-diagnostic.jsonl
           if-no-files-found: warn
           retention-days: 14
+
+  windows-runtime-health-diagnostic:
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'windows-runtime-health-diagnostic'
+    name: windows-runtime-health-diagnostic
+    runs-on: windows-2025
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Prepare packaged Runtime seed
+        run: npm run prepare:runtime-seed -- --platform windows --arch x64
+
+      - name: Extract packaged Runtime seed
+        shell: pwsh
+        run: |
+          $archive = Get-ChildItem resources/agentera-runtime-seed/*.zip | Select-Object -First 1
+          if ($null -eq $archive) { throw "Runtime seed archive not found" }
+          $manifest = Get-ChildItem resources/agentera-runtime-seed/*.manifest.json | Select-Object -First 1
+          if ($null -eq $manifest) { throw "Runtime seed manifest not found" }
+          $destination = Join-Path $env:RUNNER_TEMP "runtime-health-seed"
+          Expand-Archive -LiteralPath $archive.FullName -DestinationPath $destination -Force
+          $runtimeRoot = Join-Path $destination "agentera-runtime"
+          if (-not (Test-Path -LiteralPath (Join-Path $runtimeRoot "python") -PathType Container)) {
+            throw "Extracted Runtime root is missing"
+          }
+          "AERA_RUNTIME_HEALTH_ROOT=$runtimeRoot" >> $env:GITHUB_ENV
+          "AERA_RUNTIME_HEALTH_MANIFEST=$($manifest.FullName)" >> $env:GITHUB_ENV
+
+      - name: Run extracted Runtime health lifecycle diagnostic
+        shell: pwsh
+        run: |
+          $evidence = Join-Path $env:RUNNER_TEMP "runtime-health-diagnostics"
+          New-Item -ItemType Directory -Force -Path $evidence | Out-Null
+          $output = Join-Path $evidence "events.jsonl"
+          $env:AERA_RUNTIME_HEALTH_DIAGNOSTIC_OUTPUT = $output
+          $env:AGENTERA_E2E_DIAGNOSTICS = "1"
+          $env:AGENTERA_E2E_RUNTIME_CONTRACT_DIAGNOSTIC_OUTPUT = $output
+          $env:AERA_RUNTIME_HEALTH_TIMEOUT_MS = "120000"
+          npm test -- tests/runtime-health-diagnostics.test.ts --run --maxWorkers=1 --testTimeout=180000
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload Runtime health lifecycle evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-runtime-health-diagnostic-${{ github.run_id }}
+          path: ${{ runner.temp }}/runtime-health-diagnostics
+          if-no-files-found: warn
+          retention-days: 14
+          compression-level: 0
