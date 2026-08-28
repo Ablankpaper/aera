@@ -118,6 +118,7 @@ jobs:
           const allowedSkippedJobs = new Set([
             "windows-process-tree-diagnostic",
             "windows-managed-gateway-diagnostic",
+            "windows-runtime-health-diagnostic",
           ]);
           for (const job of run.jobs) {
             const executed = job.steps?.filter((step) => step.conclusion !== "skipped") ?? [];
