@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import {
   buildManagedGatewayConfig,
@@ -593,6 +596,67 @@ test("cleanup never signals a stale pre-launch PID even while it is alive", asyn
       (entry) => entry.pid === 5555 && entry.reason === "pre-launch-pid",
     ),
   );
+});
+
+test("desktop env mode spreads the parent environment like the managed Desktop spawn", () => {
+  const env = buildManagedGatewayEnvironment({
+    platform: "windows",
+    python: "C:\\seed\\agentera-runtime\\python\\python.exe",
+    hermesHome: "C:\\run\\hermes-home",
+    fakeHome: "C:\\run\\home",
+    apiServerKey: "diagnostic-key-only",
+    apiServerPort: 18642,
+    baseEnv: {
+      PATH: "C:\\Windows\\System32",
+      CI: "true",
+      GITHUB_ACTIONS: "true",
+      OPENAI_API_KEY: "parent-marker",
+    },
+    envMode: "desktop",
+  });
+
+  // The managed Desktop spawn spreads process.env: runner markers and parent
+  // variables DO reach the child, unlike the minimal diagnostic environment.
+  assert.equal(env.CI, "true");
+  assert.equal(env.GITHUB_ACTIONS, "true");
+  assert.equal(env.OPENAI_API_KEY, "parent-marker");
+  assert.equal(env.HERMES_HOME, "C:\\run\\hermes-home");
+  assert.equal(env.API_SERVER_KEY, "diagnostic-key-only");
+  assert.equal(env.API_SERVER_ENABLED, "true");
+  assert.match(env.PATH, /^C:\\seed\\agentera-runtime\\python;/u);
+  // Desktop does not synthesize the fake-home AppData redirects.
+  assert.equal(env.USERPROFILE, undefined);
+  assert.equal(env.APPDATA, undefined);
+  assert.equal(env.LOCALAPPDATA, undefined);
+});
+
+test("file stdio mode captures the child stderr tail from the inherited log", async () => {
+  const phaseRoot = mkdtempSync(join(tmpdir(), "stderr-mode-"));
+  const logPath = join(phaseRoot, "gateway-stderr.log");
+  const result = await runChildToExit({
+    phase: {
+      name: "stderr-file-mode",
+      file: process.execPath,
+      cwd: process.cwd(),
+      args: ["-e", "console.error('stderr-file-mode-marker')"],
+    },
+    env: process.env,
+    timeoutMs: 5_000,
+    emit: () => {},
+    pidPath: join(phaseRoot, "gateway.pid"),
+    readEvidence: async () => null,
+    isAlive: () => false,
+    terminate: async () => ({ attempted: false, error: null }),
+    cleanupWaitMs: 0,
+    sleepFn: async () => {},
+    stdioMode: "file",
+    stderrLogPath: logPath,
+  });
+
+  assert.equal(result.outcome, "exited");
+  assert.equal(result.exitCode, 0);
+  assert.match(result.stderrTail, /stderr-file-mode-marker/u);
+  assert.ok(result.stderrBytes > 0);
 });
 
 test("phase summary retains wrapper, listener, pid-file, importtime, faulthandler, and cleanup evidence", () => {

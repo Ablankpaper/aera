@@ -24,9 +24,11 @@ import { execFile, spawn } from "node:child_process";
 import { request as httpRequest } from "node:http";
 import {
   appendFileSync,
+  closeSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readFileSync,
   readdirSync,
   rmSync,
@@ -119,10 +121,37 @@ export function buildManagedGatewayEnvironment({
   apiServerKey,
   apiServerPort,
   baseEnv = process.env,
+  envMode = "minimal",
 }) {
   const windows = isWindowsPlatform(platform);
   const pathApi = pathApiForPlatform(platform);
   const delimiter = windows ? ";" : ":";
+
+  const systemPath = readCaseInsensitiveEnv(baseEnv, "PATH") ?? "";
+  const pythonDirectory = pathApi.dirname(python);
+  const managedPath = [pythonDirectory, systemPath]
+    .filter(Boolean)
+    .join(delimiter);
+
+  if (envMode === "desktop") {
+    // Reproduce hermes.ts buildGatewayEnv(): the managed Desktop spawn
+    // spreads the parent environment and then overrides only the managed
+    // fields. CI markers and runner variables therefore DO reach the child —
+    // exactly the boundary the controlled diagnostic must observe.
+    const environment = { ...baseEnv };
+    Object.assign(environment, {
+      PATH: managedPath,
+      HOME: fakeHome,
+      HERMES_HOME: hermesHome,
+      API_SERVER_ENABLED: "true",
+      API_SERVER_PORT: String(positivePort(apiServerPort)),
+      API_SERVER_KEY: safeSecret(apiServerKey),
+      PYTHONNOUSERSITE: "1",
+      PYTHONDONTWRITEBYTECODE: "1",
+    });
+    return environment;
+  }
+
   const environment = {};
 
   for (const name of SAFE_SYSTEM_ENV_NAMES) {
@@ -130,14 +159,14 @@ export function buildManagedGatewayEnvironment({
     if (value !== undefined) environment[name] = value;
   }
 
-  const systemPath = readCaseInsensitiveEnv(baseEnv, "PATH") ?? "";
-  const pythonDirectory = pathApi.dirname(python);
+  const systemPathLegacy = readCaseInsensitiveEnv(baseEnv, "PATH") ?? "";
+  const pythonDirectoryLegacy = pathApi.dirname(python);
   // Match RuntimeInvocation.environment(): managed Desktop prepends only the
   // selected interpreter directory to the already-enhanced parent PATH. Do
   // not add runtimeRoot/runtime here; doing so would admit a command lookup
   // that the real managed Gateway does not receive and could hide the actual
   // packaged dispatch failure we are trying to localise.
-  environment.PATH = [pythonDirectory, systemPath]
+  environment.PATH = [pythonDirectoryLegacy, systemPathLegacy]
     .filter(Boolean)
     .join(delimiter);
 
@@ -1536,6 +1565,8 @@ export function runChildToExit({
   cleanupWaitMs = CLEANUP_WAIT_MS,
   sampleCpu = sampleCpuSeconds,
   nowFn = Date.now,
+  stdioMode = "pipe",
+  stderrLogPath = null,
 }) {
   return new Promise((resolvePhase) => {
     const startedAt = nowFn();
@@ -1546,14 +1577,28 @@ export function runChildToExit({
       pidFileBefore = { state: "unreadable", pid: null };
     }
     let child;
+    let stderrFd = -1;
     try {
+      const useFileStderr = stdioMode === "file" && stderrLogPath !== null;
+      if (useFileStderr) stderrFd = openSync(stderrLogPath, "a");
       child = spawn(phase.file, phase.args, {
         cwd: phase.cwd,
         env,
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: useFileStderr
+          ? ["ignore", "ignore", stderrFd]
+          : ["ignore", "pipe", "pipe"],
         detached: process.platform !== "win32",
         windowsHide: true,
       });
+      // The child inherited the handle; drop the parent copy immediately.
+      if (stderrFd >= 0) {
+        try {
+          closeSync(stderrFd);
+        } catch {
+          // best-effort
+        }
+        stderrFd = -1;
+      }
     } catch (error) {
       resolvePhase({
         phase: phase.name,
@@ -1614,6 +1659,18 @@ export function runChildToExit({
         settled = true;
         clearTimeout(timeoutTimer);
         clearInterval(sampleTimer);
+        if (stdioMode === "file" && stderrLogPath !== null) {
+          try {
+            const raw = readFileSync(stderrLogPath);
+            stderrBytes = raw.length;
+            stderrTail =
+              raw.length > DIAGNOSTIC_TAIL_BYTES
+                ? raw.subarray(raw.length - DIAGNOSTIC_TAIL_BYTES)
+                : raw;
+          } catch {
+            // Keep the pipe-era zeros when the log is unreadable.
+          }
+        }
         try {
           pidFileAfter = await readPidEntry();
         } catch {
@@ -1807,6 +1864,8 @@ export async function runGatewayPhase({
   cleanupWaitMs = CLEANUP_WAIT_MS,
   sampleCpu = sampleCpuSeconds,
   nowFn = Date.now,
+  stdioMode = "pipe",
+  stderrLogPath = null,
 }) {
   const startedAt = nowFn();
   let pidFileBefore;
@@ -1816,16 +1875,29 @@ export async function runGatewayPhase({
     pidFileBefore = { state: "unreadable", pid: null };
   }
   let child;
+  let gatewayStderrFd = -1;
   try {
+    const useFileStderr = stdioMode === "file" && stderrLogPath !== null;
+    if (useFileStderr) gatewayStderrFd = openSync(stderrLogPath, "a");
     child = spawnFn(phase.file, phase.args, {
       cwd: phase.cwd,
       env,
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: useFileStderr
+        ? ["ignore", "ignore", gatewayStderrFd]
+        : ["ignore", "pipe", "pipe"],
       // Match Desktop's managed spawn: POSIX gets a dedicated process group;
       // Windows cleanup uses the verified taskkill tree instead.
       detached: process.platform !== "win32",
       windowsHide: true,
     });
+    if (gatewayStderrFd >= 0) {
+      try {
+        closeSync(gatewayStderrFd);
+      } catch {
+        // best-effort
+      }
+      gatewayStderrFd = -1;
+    }
   } catch (error) {
     return {
       phase: phase.name,
@@ -1991,6 +2063,18 @@ export async function runGatewayPhase({
     pidFileAfter = { state: "unreadable", pid: null };
   }
   clearInterval(sampleTimer);
+  if (stdioMode === "file" && stderrLogPath !== null) {
+    try {
+      const raw = readFileSync(stderrLogPath);
+      stderrBytes = raw.length;
+      stderrTail =
+        raw.length > DIAGNOSTIC_TAIL_BYTES
+          ? raw.subarray(raw.length - DIAGNOSTIC_TAIL_BYTES)
+          : raw;
+    } catch {
+      // Keep the pipe-era zeros when the log is unreadable.
+    }
+  }
   const outcome = serving.ready
     ? "ready-cleaned"
     : serving.outcome === "child-exited"
@@ -2110,12 +2194,22 @@ function parseArgs(argv) {
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
     throw new Error("--timeout-ms must be a positive integer");
   }
+  const envMode = values.env_mode ?? "minimal";
+  if (!["minimal", "desktop"].includes(envMode)) {
+    throw new Error("--env-mode must be minimal or desktop");
+  }
+  const stdioMode = values.stdio_mode ?? "pipe";
+  if (!["pipe", "file"].includes(stdioMode)) {
+    throw new Error("--stdio-mode must be pipe or file");
+  }
   return {
     runtimeRoot: values.runtime_root,
     manifestPath: values.manifest,
     profile: values.profile ?? undefined,
     timeoutMs,
     output: values.output ?? null,
+    envMode,
+    stdioMode,
   };
 }
 
@@ -2201,6 +2295,8 @@ async function main() {
     timeoutMs: options.timeoutMs,
     phases: 6,
     stacktraceOnReadinessTimeout: true,
+    envMode: options.envMode,
+    stdioMode: options.stdioMode,
   });
 
   const results = [];
@@ -2225,6 +2321,7 @@ async function main() {
     mkdirSync(hermesRoot, { recursive: true });
     mkdirSync(hermesHome, { recursive: true });
     const pidPath = pathApi.join(hermesHome, "gateway.pid");
+    const stderrLogPath = pathApi.join(phaseRoot, "gateway-stderr.log");
     const apiServerKey = `aera-diagnostic-${randomBytes(18).toString("hex")}`;
     secrets.push(apiServerKey);
     const apiServerPort = await reserveLoopbackPort();
@@ -2248,6 +2345,7 @@ async function main() {
       apiServerKey,
       apiServerPort,
       baseEnv: process.env,
+      envMode: options.envMode,
     });
     emit("phase-start", {
       phase: phase.name,
@@ -2256,6 +2354,8 @@ async function main() {
       pidFile: pidPath,
       port: apiServerPort,
       configMaterialized: true,
+      envMode: options.envMode,
+      stdioMode: options.stdioMode,
     });
 
     let result = phase.waitForGateway
@@ -2268,6 +2368,8 @@ async function main() {
           port: apiServerPort,
           apiServerKey,
           python,
+          stdioMode: options.stdioMode,
+          stderrLogPath,
         })
       : await runChildToExit({
           phase,
@@ -2275,6 +2377,8 @@ async function main() {
           timeoutMs: options.timeoutMs,
           emit,
           pidPath,
+          stdioMode: options.stdioMode,
+          stderrLogPath,
         });
     // Add the result to the queue before touching the sandbox. If Windows
     // refuses removal because a residue process still owns it, the exact

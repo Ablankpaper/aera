@@ -249,11 +249,27 @@ jobs:
           --manifest "$env:SEED_MANIFEST"
           --output "$env:RUNNER_TEMP/managed-gateway-diagnostic.jsonl"
 
+      # Controlled comparison against the packaged Desktop boundary: the
+      # failing managed spawn spreads the parent environment and routes
+      # stderr through an inherited file handle. Reproduce exactly those two
+      # dimensions on the same seed so a hang localises to env, stdio, or the
+      # Electron parent-process boundary.
+      - name: Diagnose the Desktop-equivalent env and stdio boundary
+        run: >-
+          node scripts/diagnose-windows-serve-help.mjs
+          --runtime-root "$env:SEED_EXTRACT_ROOT"
+          --manifest "$env:SEED_MANIFEST"
+          --env-mode desktop
+          --stdio-mode file
+          --output "$env:RUNNER_TEMP/controlled-gateway-diagnostic.jsonl"
+
       - name: Upload managed Gateway diagnostic evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: windows-managed-gateway-diagnostic-${{ github.run_id }}
-          path: ${{ runner.temp }}/managed-gateway-diagnostic.jsonl
+          path: |
+            ${{ runner.temp }}/managed-gateway-diagnostic.jsonl
+            ${{ runner.temp }}/controlled-gateway-diagnostic.jsonl
           if-no-files-found: warn
           retention-days: 14
