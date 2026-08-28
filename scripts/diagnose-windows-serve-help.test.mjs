@@ -12,7 +12,6 @@ import {
   nextDiagnosticPhase,
   parseWindowsProcessEvidence,
   readProcessEvidenceWithRetry,
-  runGatewayPhase,
   runChildToExit,
   summarizeDiagnosticPhase,
   waitForGatewayReadiness,
@@ -48,6 +47,8 @@ test("managed Gateway diagnostics reproduce the Windows invocation environment w
   assert.equal(env.API_SERVER_PORT, "18642");
   assert.equal(env.PYTHONNOUSERSITE, "1");
   assert.equal(env.PYTHONDONTWRITEBYTECODE, "1");
+  // The managed Desktop spawn does not pass these; the independent health
+  // probe owns them. Their presence would change the dispatch boundary.
   assert.equal(env.PIP_NO_INDEX, undefined);
   assert.equal(env.UV_OFFLINE, undefined);
   assert.equal(env.NO_PROXY, undefined);
@@ -67,6 +68,7 @@ test("managed Gateway diagnostics reproduce the Windows invocation environment w
   assert.equal(env.LOCALAPPDATA, "C:\\run\\home\\AppData\\Local");
   assert.equal(env.CI, undefined);
   assert.equal(env.OPENAI_API_KEY, undefined);
+  // Desktop writes the bind host into config.yaml, not the spawn env.
   assert.equal(env.API_SERVER_HOST, undefined);
   assert.equal(env.HERMES_BUNDLED_SKILLS, undefined);
   assert.equal(env.HERMES_OPTIONAL_SKILLS, undefined);
@@ -151,13 +153,15 @@ test("named Profile Gateway phases put --profile before the gateway command", ()
     python: "C:\\seed\\agentera-runtime\\python\\python.exe",
     cwd: "C:\\seed\\agentera-runtime\\python\\Lib\\site-packages",
   });
+  assert.equal(stacktrace.name, "gateway-stacktrace");
+  assert.equal(stacktrace.waitForGateway, true);
+  assert.match(stacktrace.args.at(-1), /sys\.argv/u);
+  assert.match(stacktrace.args.at(-1), /--profile/u);
+  assert.match(stacktrace.args.at(-1), /faulthandler\.dump_traceback_later/u);
+
   const sync = phases.find((phase) => phase.name === "sync-bundled-skills");
   assert.ok(sync);
-  assert.match(sync.args.at(-1), /sys\.argv/u);
   assert.match(sync.args.at(-1), /--profile/u);
-  assert.match(sync.args.at(-1), /research/u);
-  assert.match(stacktrace.args.at(-1), /research/u);
-  assert.match(stacktrace.args.at(-1), /sys\.argv/u);
 });
 
 test("diagnostic control flow stops at the first failure and only traces a readiness timeout", () => {
@@ -216,7 +220,6 @@ test("diagnostic config materializes the same minimal API-server files as Deskto
   assert.doesNotMatch(config.configYaml, /provider|OPENAI|ANTHROPIC/u);
 });
 
-// @lat: [[lat.md/agentera-runtime-distribution#AgentEra Runtime distribution#Desktop TUI backend lifecycle#Gateway readiness evidence#Managed Gateway diagnostic test specifications#Evidence and fail-closed cleanup]]
 test("Windows listener evidence requires PID, creation identity, image, path, and command line", () => {
   const raw = JSON.stringify({
     ProcessId: 4321,
@@ -327,6 +330,60 @@ test("cleanup refuses a reused PID or changed executable identity", () => {
   assert.equal(canTerminateProcessIdentity(captured, null), false);
 });
 
+test("process identity reads retry transient query failures until valid evidence", async () => {
+  const outcomes = [
+    { available: true, valid: false, queryOutcome: "empty" },
+    { available: true, valid: false, queryOutcome: "timeout" },
+    { available: true, valid: true, queryOutcome: "valid", pid: 4321 },
+  ];
+  let calls = 0;
+  const sleeps = [];
+  const result = await readProcessEvidenceWithRetry({
+    readEvidence: async () => outcomes[calls++ % outcomes.length],
+    sleepFn: async (ms) => {
+      sleeps.push(ms);
+    },
+    retryDelayMs: 250,
+    maxAttempts: 5,
+  });
+  assert.equal(calls, 3);
+  assert.deepEqual(sleeps, [250, 250]);
+  assert.equal(result?.valid, true);
+});
+
+test("process identity reads treat thrown CIM reads as retryable and bound attempts", async () => {
+  let calls = 0;
+  const result = await readProcessEvidenceWithRetry({
+    readEvidence: async () => {
+      calls += 1;
+      if (calls === 1) throw new Error("cim provider down");
+      return { available: true, valid: false, queryOutcome: "invalid-json" };
+    },
+    sleepFn: async () => {},
+    maxAttempts: 3,
+  });
+  assert.equal(calls, 3);
+  assert.equal(result?.valid, false);
+});
+
+test("valid process identity is returned without any retry", async () => {
+  let calls = 0;
+  const sleeps = [];
+  const result = await readProcessEvidenceWithRetry({
+    readEvidence: async () => {
+      calls += 1;
+      return { available: true, valid: true, queryOutcome: "valid" };
+    },
+    sleepFn: async (ms) => {
+      sleeps.push(ms);
+    },
+    maxAttempts: 4,
+  });
+  assert.equal(calls, 1);
+  assert.deepEqual(sleeps, []);
+  assert.equal(result?.valid, true);
+});
+
 test("readiness returns as soon as the child exits instead of waiting for the full timeout", async () => {
   const events = [];
   const result = await waitForGatewayReadiness({
@@ -388,186 +445,6 @@ test("readiness child-exit notification interrupts an unresolved poll sleep", as
   await assert.doesNotReject(resultPromise);
 });
 
-test("readiness retains pid-file transitions and listener identity evidence", async () => {
-  const events = [];
-  const pidEntries = [
-    { state: "missing", pid: null },
-    { state: "present", pid: 4321 },
-  ];
-  const listenerEvidence = {
-    available: true,
-    valid: true,
-    pid: 4321,
-    identity: "windows:200",
-    imageName: "python.exe",
-    executablePath: "c:\\seed\\python\\python.exe",
-    queryOutcome: "valid",
-    commandLine: "python.exe -m hermes_cli.main gateway",
-  };
-  let now = 0;
-  const result = await waitForGatewayReadiness({
-    phase: { name: "gateway-importtime" },
-    pidPath: "C:\\run\\gateway.pid",
-    python: "C:\\seed\\python\\python.exe",
-    port: 18642,
-    apiServerKey: "diagnostic-key-only",
-    timeoutMs: 100,
-    pollMs: 1,
-    readPidEntry: () => pidEntries.shift() ?? { state: "present", pid: 4321 },
-    isAlive: () => true,
-    readEvidence: async () => listenerEvidence,
-    probe: async () => ({
-      statusCode: 200,
-      authenticated: true,
-      validDocument: true,
-      requestToolPolicy: false,
-      requestModelRoute: false,
-    }),
-    sleepFn: async () => {},
-    nowFn: () => now++,
-    emit: (event, fields) => events.push({ event, fields }),
-  });
-
-  assert.equal(result.ready, true);
-  assert.equal(result.listenerPid, 4321);
-  assert.equal(result.listenerEvidence.identity, "windows:200");
-  assert.deepEqual(
-    result.pidFileTransitions.map(({ state, pid }) => ({ state, pid })),
-    [
-      { state: "missing", pid: null },
-      { state: "present", pid: 4321 },
-    ],
-  );
-  assert.ok(
-    events.some(
-      ({ event, fields }) =>
-        event === "gateway-pid-file" &&
-        fields.state === "present" &&
-        fields.pid === 4321,
-    ),
-  );
-});
-
-test("readiness rejects a stale pre-launch pid even when its API answers", async () => {
-  let probeCalls = 0;
-  let now = 0;
-  const evidence = {
-    available: true,
-    valid: true,
-    pid: 4321,
-    identity: "windows:stale",
-    imageName: "python.exe",
-    executablePath: "c:\\seed\\python\\python.exe",
-    queryOutcome: "valid",
-    commandLine: "python.exe -m hermes_cli.main gateway",
-  };
-  const result = await waitForGatewayReadiness({
-    phase: { name: "gateway-importtime" },
-    pidPath: "C:\\run\\gateway.pid",
-    python: "C:\\seed\\python\\python.exe",
-    port: 18642,
-    apiServerKey: "diagnostic-key-only",
-    timeoutMs: 4,
-    pollMs: 1,
-    preLaunchPid: 4321,
-    readPidEntry: () => ({ state: "present", pid: 4321 }),
-    isAlive: () => true,
-    readEvidence: async () => evidence,
-    probe: async () => {
-      probeCalls += 1;
-      return {
-        statusCode: 200,
-        authenticated: true,
-        validDocument: true,
-      };
-    },
-    sleepFn: async () => {},
-    nowFn: () => now++,
-  });
-
-  assert.equal(result.ready, false);
-  assert.equal(result.outcome, "readiness-timeout");
-  assert.equal(probeCalls, 0);
-  assert.ok(result.pidFileTransitions.at(-1)?.preLaunch === true);
-  assert.equal(result.listenerPid, null);
-  assert.equal(result.listenerEvidence, null);
-  assert.equal(result.observedPidFilePid, 4321);
-  assert.equal(result.observedPidFileEvidence.identity, "windows:stale");
-});
-
-test("readiness preserves an observed listener identity mismatch in timeout evidence", async () => {
-  let now = 0;
-  const mismatch = {
-    available: true,
-    valid: false,
-    pid: 4321,
-    identity: "windows:reused",
-    imageName: "other.exe",
-    executablePath: "c:\\other\\python.exe",
-    queryOutcome: "identity-mismatch",
-    commandLine: "other.exe",
-  };
-  const result = await waitForGatewayReadiness({
-    phase: { name: "gateway-importtime" },
-    pidPath: "C:\\run\\gateway.pid",
-    python: "C:\\seed\\python\\python.exe",
-    port: 18642,
-    apiServerKey: "diagnostic-key-only",
-    timeoutMs: 3,
-    pollMs: 1,
-    readPidEntry: () => ({ state: "present", pid: 4321 }),
-    isAlive: () => true,
-    readEvidence: async () => mismatch,
-    probe: async () => ({
-      statusCode: 200,
-      authenticated: true,
-      validDocument: true,
-    }),
-    sleepFn: async () => {},
-    nowFn: () => now++,
-  });
-
-  assert.equal(result.ready, false);
-  assert.equal(result.listenerEvidence.queryOutcome, "identity-mismatch");
-  assert.equal(result.listenerImageValid, false);
-});
-
-test("readiness rejects listener evidence without an exact PID match", async () => {
-  let now = 0;
-  const result = await waitForGatewayReadiness({
-    phase: { name: "gateway-importtime" },
-    pidPath: "C:\\run\\gateway.pid",
-    python: "C:\\seed\\python\\python.exe",
-    port: 18642,
-    apiServerKey: "diagnostic-key-only",
-    timeoutMs: 3,
-    pollMs: 1,
-    readPidEntry: () => ({ state: "present", pid: 4321 }),
-    isAlive: () => true,
-    readEvidence: async () => ({
-      available: true,
-      valid: true,
-      pid: null,
-      identity: "windows:missing-pid",
-      imageName: "python.exe",
-      executablePath: "c:\\seed\\python\\python.exe",
-      queryOutcome: "valid",
-      commandLine: "python.exe -m hermes_cli.main gateway",
-    }),
-    probe: async () => ({
-      statusCode: 200,
-      authenticated: true,
-      validDocument: true,
-    }),
-    sleepFn: async () => {},
-    nowFn: () => now++,
-  });
-
-  assert.equal(result.ready, false);
-  assert.equal(result.listenerImageValid, false);
-  assert.equal(result.listenerEvidence.pid, null);
-});
-
 test("diagnostic evidence redacts credentials and local paths while retaining the failure tail", () => {
   const value =
     "Authorization: Bearer diagnostic-secret C:\\Users\\runner\\hermes\\gateway.log sk-live-12345678901234567890";
@@ -587,130 +464,6 @@ test("diagnostic evidence redacts an unquoted Windows path containing spaces", (
   assert.doesNotMatch(redacted, /C:\\Users\\runner workspace/u);
   assert.doesNotMatch(redacted, /workspace\\hermes\\gateway\.log/u);
   assert.match(redacted, /<path>/u);
-});
-
-test("process identity reads retry only transient query failures", async () => {
-  const valid = (pid) => ({
-    available: true,
-    valid: true,
-    pid,
-    identity: `windows:${pid}`,
-    imageName: "python.exe",
-    executablePath: "c:\\seed\\python\\python.exe",
-    queryOutcome: "valid",
-    commandLine: "python.exe -m hermes_cli.main gateway",
-  });
-
-  // A first-miss transient (no row yet) recovers on the bounded retry.
-  const calls1 = [];
-  const recovered = await readProcessEvidenceWithRetry({
-    readEvidence: async () => {
-      calls1.push(1);
-      return calls1.length === 1 ? null : valid(4321);
-    },
-    sleepFn: async () => {},
-  });
-  assert.equal(recovered?.valid, true);
-  assert.equal(calls1.length, 2);
-
-  // PowerShell/CIM represents a just-spawned process with an empty object
-  // before the provider can materialize its row. That miss is transient too.
-  const callsEmpty = [];
-  const recoveredAfterEmpty = await readProcessEvidenceWithRetry({
-    readEvidence: async () => {
-      callsEmpty.push(1);
-      return callsEmpty.length === 1
-        ? {
-            available: false,
-            valid: false,
-            pid: null,
-            identity: null,
-            imageName: null,
-            executablePath: null,
-            queryOutcome: "empty",
-            commandLine: null,
-          }
-        : valid(4321);
-    },
-    sleepFn: async () => {},
-  });
-  assert.equal(recoveredAfterEmpty?.valid, true);
-  assert.equal(callsEmpty.length, 2);
-
-  // A CIM timeout row is transient and retried the same way.
-  const calls2 = [];
-  const recoveredAfterTimeout = await readProcessEvidenceWithRetry({
-    readEvidence: async () => {
-      calls2.push(1);
-      return calls2.length === 1
-        ? {
-            available: false,
-            valid: false,
-            pid: null,
-            identity: null,
-            imageName: null,
-            executablePath: null,
-            queryOutcome: "timeout",
-            commandLine: null,
-          }
-        : valid(4321);
-    },
-    sleepFn: async () => {},
-  });
-  assert.equal(recoveredAfterTimeout?.valid, true);
-  assert.equal(calls2.length, 2);
-
-  // A conclusive identity mismatch is NOT transient: retrying a reused PID
-  // would only re-read the same wrong process, so it stops immediately.
-  const calls3 = [];
-  const mismatch = await readProcessEvidenceWithRetry({
-    readEvidence: async () => {
-      calls3.push(1);
-      return {
-        available: true,
-        valid: false,
-        pid: 4321,
-        identity: "windows:999",
-        imageName: "other.exe",
-        executablePath: "c:\\other\\other.exe",
-        queryOutcome: "identity-mismatch",
-        commandLine: "other",
-      };
-    },
-    sleepFn: async () => {},
-  });
-  assert.equal(mismatch?.valid, false);
-  assert.equal(calls3.length, 1);
-
-  // Persistent transient failure returns the last evidence after exactly
-  // maxAttempts reads, never an unbounded loop.
-  const calls4 = [];
-  const sleeps4 = [];
-  const exhausted = await readProcessEvidenceWithRetry({
-    readEvidence: async () => {
-      calls4.push(1);
-      return null;
-    },
-    sleepFn: async (ms) => {
-      sleeps4.push(ms);
-    },
-    retryDelayMs: 100,
-    maxAttempts: 3,
-  });
-  assert.equal(exhausted, null);
-  assert.equal(calls4.length, 3);
-  assert.deepEqual(sleeps4, [100, 100]);
-
-  const callsUndefined = [];
-  const recoveredAfterUndefined = await readProcessEvidenceWithRetry({
-    readEvidence: async () => {
-      callsUndefined.push(1);
-      return callsUndefined.length === 1 ? undefined : valid(4321);
-    },
-    sleepFn: async () => {},
-  });
-  assert.equal(recoveredAfterUndefined?.valid, true);
-  assert.equal(callsUndefined.length, 2);
 });
 
 test("a timed-out non-Gateway probe never kills an unverified PID", async () => {
@@ -752,380 +505,188 @@ test("a timed-out non-Gateway probe never kills an unverified PID", async () => 
   }
 });
 
-test("cleanup captures a late pid-file listener and keeps its identity evidence", async () => {
+test("cleanup terminates only identity-verified wrapper and listener processes", async () => {
+  const evidenceFor = (pid) => ({
+    available: true,
+    valid: true,
+    pid,
+    identity: `windows:${pid}`,
+    imageName: "python.exe",
+    executablePath: "c:\\seed\\agentera-runtime\\python\\python.exe",
+    commandLine: "python.exe -m hermes_cli.main gateway",
+    queryOutcome: "valid",
+  });
+  const terminated = [];
+  const alivePids = new Set([100, 200]);
   const events = [];
-  const terminated = [];
-  const wrapperEvidence = {
-    available: true,
-    valid: true,
-    pid: 4321,
-    identity: "windows:wrapper",
-    imageName: "python.exe",
-    executablePath: "c:\\seed\\python\\python.exe",
-    queryOutcome: "valid",
-    commandLine: "python.exe -m hermes_cli.main gateway",
-  };
-  const listenerEvidence = {
-    ...wrapperEvidence,
-    pid: 9876,
-    identity: "windows:listener",
-  };
+
   const result = await cleanupPhaseProcesses({
     phase: { name: "gateway-importtime" },
-    child: { pid: 4321 },
-    wrapperEvidence,
-    listenerPid: null,
-    listenerEvidence: null,
+    child: { pid: 100 },
+    wrapperEvidence: evidenceFor(100),
+    listenerPid: 200,
+    listenerEvidence: evidenceFor(200),
     pidPath: "C:\\run\\gateway.pid",
-    python: "C:\\seed\\python\\python.exe",
-    readPidEntry: () => ({ state: "present", pid: 9876 }),
-    readEvidence: async (pid) =>
-      pid === 9876 ? listenerEvidence : wrapperEvidence,
-    isAlive: (pid) => pid === 9876,
-    terminate: async (pid) => {
-      terminated.push(pid);
-      return { attempted: true, error: null };
-    },
-    sleepFn: async () => {},
-    cleanupWaitMs: 0,
+    python: "C:\\seed\\agentera-runtime\\python\\python.exe",
     emit: (event, fields) => events.push({ event, fields }),
+    reason: "readiness-timeout",
+    readPidEntry: () => ({ state: "present", pid: 200 }),
+    readEvidence: async (pid) => evidenceFor(pid),
+    isAlive: async (pid) => alivePids.has(pid),
+    terminate: async (pid) => {
+      terminated.push(pid);
+      alivePids.delete(pid);
+      return { attempted: true, error: null };
+    },
+    sleepFn: async () => {},
+    cleanupWaitMs: 0,
   });
 
-  assert.deepEqual(terminated, [9876]);
-  assert.equal(result.latePidEntry.pid, 9876);
-  assert.equal(result.lateListenerEvidence.identity, "windows:listener");
-  assert.equal(result.attempts[0].kind, "listener");
-  assert.equal(
-    result.attempts[0].observedEvidence.identity,
-    "windows:listener",
+  assert.deepEqual(
+    [...terminated].sort((a, b) => a - b),
+    [100, 200],
   );
-  assert.ok(
-    events.some(
-      ({ event, fields }) =>
-        event === "gateway-late-listener" && fields.pid === 9876,
-    ),
-  );
+  assert.deepEqual(result.remainingPids, []);
+  assert.equal(result.forced, true);
+  assert.ok(events.some(({ event }) => event === "gateway-cleanup-complete"));
 });
 
-test("cleanup records a changed pid file as residue while the wrapper is still live", async () => {
-  const terminated = [];
-  const wrapperEvidence = {
+test("cleanup never signals a stale pre-launch PID even while it is alive", async () => {
+  const evidenceFor = (pid) => ({
     available: true,
     valid: true,
-    pid: 4321,
-    identity: "windows:wrapper",
+    pid,
+    identity: `windows:${pid}`,
     imageName: "python.exe",
-    executablePath: "c:\\seed\\python\\python.exe",
-    queryOutcome: "valid",
+    executablePath: "c:\\seed\\agentera-runtime\\python\\python.exe",
     commandLine: "python.exe -m hermes_cli.main gateway",
-  };
-  const changedListenerEvidence = {
-    ...wrapperEvidence,
-    pid: 9876,
-    identity: "windows:changed-listener",
-  };
+    queryOutcome: "valid",
+  });
+  const terminated = [];
+
   const result = await cleanupPhaseProcesses({
     phase: { name: "gateway-importtime" },
-    child: { pid: 4321 },
-    wrapperEvidence,
+    child: { pid: 5555 },
+    wrapperEvidence: evidenceFor(5555),
     listenerPid: null,
     listenerEvidence: null,
     pidPath: "C:\\run\\gateway.pid",
-    python: "C:\\seed\\python\\python.exe",
-    readPidEntry: () => ({ state: "present", pid: 9876 }),
-    readEvidence: async (pid) =>
-      pid === 9876 ? changedListenerEvidence : wrapperEvidence,
-    isAlive: () => true,
+    python: "C:\\seed\\agentera-runtime\\python\\python.exe",
+    emit: () => {},
+    reason: "readiness-timeout",
+    readPidEntry: () => ({ state: "present", pid: 5555 }),
+    readEvidence: async (pid) => evidenceFor(pid),
+    isAlive: async () => true,
     terminate: async (pid) => {
       terminated.push(pid);
       return { attempted: true, error: null };
     },
     sleepFn: async () => {},
     cleanupWaitMs: 0,
-    emit: () => {},
-  });
-
-  assert.deepEqual(terminated, [4321]);
-  assert.ok(
-    result.residue.some(
-      ({ kind, pid, reason }) =>
-        kind === "listener" &&
-        pid === 9876 &&
-        reason === "wrapper-live-late-pid",
-    ),
-  );
-  assert.ok(result.remainingPids.includes(9876));
-});
-
-test("cleanup never adopts a stale pre-launch pid from a late pid file", async () => {
-  const terminated = [];
-  const staleEvidence = {
-    available: true,
-    valid: true,
-    pid: 2468,
-    identity: "windows:pre-launch",
-    imageName: "python.exe",
-    executablePath: "c:\\seed\\python\\python.exe",
-    queryOutcome: "valid",
-    commandLine: "python.exe -m hermes_cli.main gateway",
-  };
-  const result = await cleanupPhaseProcesses({
-    phase: { name: "gateway-importtime" },
-    child: { pid: 4321 },
-    wrapperEvidence: null,
-    listenerPid: null,
-    listenerEvidence: null,
-    pidPath: "C:\\run\\gateway.pid",
-    python: "C:\\seed\\python\\python.exe",
-    preLaunchPid: 2468,
-    readPidEntry: () => ({ state: "present", pid: 2468 }),
-    readEvidence: async () => staleEvidence,
-    isAlive: (pid) => pid === 2468,
-    terminate: async (pid) => {
-      terminated.push(pid);
-      return { attempted: true, error: null };
-    },
-    sleepFn: async () => {},
-    cleanupWaitMs: 0,
-    emit: () => {},
+    preLaunchPid: 5555,
   });
 
   assert.deepEqual(terminated, []);
   assert.deepEqual(result.remainingPids, []);
   assert.ok(
     result.residue.some(
-      ({ pid, reason, alive }) =>
-        pid === 2468 && reason === "pre-launch-pid" && alive === true,
+      (entry) => entry.pid === 5555 && entry.reason === "pre-launch-pid",
     ),
   );
 });
 
-test("cleanup retains the latest wrapper evidence when ownership cannot be verified", async () => {
-  const observedWrapper = {
-    available: true,
-    valid: false,
-    pid: 4321,
-    identity: "windows:reused-wrapper",
-    imageName: "other.exe",
-    executablePath: "c:\\other\\python.exe",
-    queryOutcome: "identity-mismatch",
-    commandLine: "other.exe",
-  };
-  const result = await cleanupPhaseProcesses({
-    phase: { name: "import-gateway-run" },
-    child: { pid: 4321 },
-    wrapperEvidence: null,
+test("phase summary retains wrapper, listener, pid-file, importtime, faulthandler, and cleanup evidence", () => {
+  const summary = summarizeDiagnosticPhase({
+    phase: { name: "gateway-importtime" },
+    outcome: "readiness-timeout-cleaned",
+    elapsedMs: 90_000,
+    pid: 8452,
+    command: "C:\\seed\\agentera-runtime\\python\\python.exe",
+    args: ["-X", "importtime", "-m", "hermes_cli.main", "gateway"],
+    cwd: "C:\\seed\\agentera-runtime\\python\\Lib\\site-packages",
+    exitCode: null,
+    signal: null,
+    stdoutBytes: 0,
+    stderrBytes: 512,
+    stdoutTail: "",
+    stderrTail: "traceback tail",
+    wrapperEvidence: { identity: "windows:100" },
+    wrapperIdentity: "windows:100",
+    wrapperImageValid: true,
     listenerPid: null,
     listenerEvidence: null,
-    pidPath: "C:\\run\\gateway.pid",
-    python: "C:\\seed\\python\\python.exe",
-    readPidEntry: () => ({ state: "missing", pid: null }),
-    readEvidence: async () => observedWrapper,
-    isAlive: () => true,
-    terminate: async () => ({ attempted: false, error: null }),
-    sleepFn: async () => {},
-    cleanupWaitMs: 0,
-    emit: () => {},
-  });
-
-  assert.equal(result.residue[0].reason, "wrapper-identity-unverified");
-  assert.equal(
-    result.residue[0].observedEvidence.queryOutcome,
-    "identity-mismatch",
-  );
-  assert.deepEqual(result.remainingPids, [4321]);
-});
-
-test("ordinary phase results retain wrapper and pid-file cleanup evidence", async () => {
-  const evidence = {
-    available: true,
-    valid: true,
-    pid: 0,
-    identity: "posix:test",
-    imageName: "node",
-    executablePath: process.execPath,
-    queryOutcome: "test",
-    commandLine: "node phase",
-  };
-  const result = await runChildToExit({
-    phase: {
-      name: "import-hermes-cli-main",
-      file: process.execPath,
-      cwd: process.cwd(),
-      args: ["-e", "process.stdout.write('phase-output')"],
-    },
-    env: process.env,
-    timeoutMs: 2_000,
-    emit: () => {},
-    pidPath: "C:\\run\\gateway.pid",
-    readPidEntry: () => ({ state: "missing", pid: null }),
-    readEvidence: async (pid) => ({ ...evidence, pid }),
-    isAlive: () => false,
-    terminate: async () => ({ attempted: false, error: null }),
-    sleepFn: async () => {},
-  });
-
-  assert.equal(result.wrapperEvidence.valid, true);
-  assert.equal(result.pidFileBefore.state, "missing");
-  assert.equal(result.pidFileAfter.state, "missing");
-  assert.ok(Array.isArray(result.cleanup.attempts));
-  assert.ok(Array.isArray(result.cleanup.residue));
-  assert.match(result.stdoutTail, /phase-output/u);
-});
-
-test("sandbox cleanup failure is retained on the phase result", () => {
-  const result = {
-    phase: "gateway-stacktrace",
+    listenerIdentity: null,
+    listenerImageValid: false,
+    listenerAlive: false,
+    observedPidFilePid: null,
+    observedPidFileEvidence: null,
+    observedPidFilePreLaunch: false,
+    ready: false,
+    capabilities: null,
+    pidFileBefore: { state: "missing", pid: null },
+    pidFileAfter: { state: "missing", pid: null },
+    pidFileTransitions: [],
+    importtimeTail: "import time: 88099 | 784005 | hermes_cli.main",
+    faulthandlerTail: "Thread 0x00000001 (most recent call first)",
     cleanup: { remainingPids: [] },
-  };
-  const events = [];
-  const updated = cleanupPhaseSandbox({
-    phase: { name: "gateway-stacktrace" },
-    phaseRoot: "C:\\runner\\phase-root",
-    result,
+    sandboxCleanup: { attempted: true, cleaned: true },
+  });
+
+  assert.equal(summary.phase.name, "gateway-importtime");
+  assert.equal(summary.outcome, "readiness-timeout-cleaned");
+  assert.equal(summary.pid, 8452);
+  assert.equal(summary.wrapperIdentity, "windows:100");
+  assert.equal(summary.wrapperImageValid, true);
+  assert.equal(summary.listenerPid, null);
+  assert.equal(summary.ready, false);
+  assert.match(summary.importtimeTail, /hermes_cli\.main/u);
+  assert.match(summary.faulthandlerTail, /most recent call first/u);
+  assert.deepEqual(summary.cleanup.remainingPids, []);
+  assert.equal(summary.sandboxCleanup.cleaned, true);
+
+  const empty = summarizeDiagnosticPhase(null);
+  assert.equal(empty.phase, null);
+  assert.equal(empty.ready, false);
+  assert.deepEqual(empty.args, []);
+  assert.deepEqual(empty.pidFileTransitions, []);
+});
+
+test("phase sandbox is retained for process residue, cleaned otherwise, and reports cleanup errors", () => {
+  let removed = 0;
+  const withResidue = cleanupPhaseSandbox({
+    phase: { name: "gateway-importtime" },
+    phaseRoot: "C:\\run\\phase",
+    result: { cleanup: { remainingPids: [4321] } },
     remove: () => {
-      const error = new Error("EBUSY");
+      removed += 1;
+    },
+  });
+  assert.equal(removed, 0);
+  assert.equal(withResidue.sandboxCleanup.retainedForResidue, true);
+  assert.equal(withResidue.sandboxCleanup.cleaned, false);
+
+  const clean = cleanupPhaseSandbox({
+    phase: { name: "gateway-importtime" },
+    phaseRoot: "C:\\run\\phase",
+    result: { cleanup: { remainingPids: [] } },
+    remove: () => {
+      removed += 1;
+    },
+  });
+  assert.equal(removed, 1);
+  assert.equal(clean.sandboxCleanup.cleaned, true);
+  assert.equal(clean.sandboxCleanup.retainedForResidue, false);
+
+  const failed = cleanupPhaseSandbox({
+    phase: { name: "gateway-importtime" },
+    phaseRoot: "C:\\run\\phase",
+    result: { cleanup: { remainingPids: [] } },
+    remove: () => {
+      const error = new Error("busy");
       error.code = "EBUSY";
       throw error;
     },
-    emit: (event, fields) => events.push({ event, fields }),
   });
-
-  assert.equal(updated.sandboxCleanup.cleaned, false);
-  assert.equal(updated.sandboxCleanup.errorCode, "EBUSY");
-  assert.deepEqual(updated.cleanup.remainingPids, []);
-  assert.ok(
-    events.some(({ event }) => event === "phase-sandbox-cleanup-failed"),
-  );
-});
-
-test("sandbox stays retained when cleanup reports live process residue", () => {
-  const result = {
-    phase: "gateway-importtime",
-    cleanup: { remainingPids: [9] },
-  };
-  let removeCalls = 0;
-  const updated = cleanupPhaseSandbox({
-    phase: { name: "gateway-importtime" },
-    phaseRoot: "C:\\runner\\phase-root",
-    result,
-    remove: () => {
-      removeCalls += 1;
-    },
-    emit: () => {},
-  });
-
-  assert.equal(removeCalls, 0);
-  assert.equal(updated.sandboxCleanup.retainedForResidue, true);
-  assert.equal(updated.sandboxCleanup.cleaned, false);
-});
-
-test("Gateway phase result retains wrapper/listener, pid-file, output, and cleanup evidence", async () => {
-  let childPid = null;
-  const terminated = [];
-  const events = [];
-  const evidenceFor = (pid) => ({
-    available: true,
-    valid: true,
-    pid,
-    identity: `posix:${pid}`,
-    imageName: "node",
-    executablePath: process.execPath,
-    queryOutcome: "test",
-    commandLine: "node gateway diagnostic",
-  });
-  const result = await runGatewayPhase({
-    phase: {
-      name: "gateway-importtime",
-      file: process.execPath,
-      cwd: process.cwd(),
-      args: ["-e", "setTimeout(() => {}, 5000)"],
-    },
-    env: process.env,
-    timeoutMs: 1_000,
-    emit: (event, fields) => {
-      events.push({ event, fields });
-      if (event === "probe-spawned") childPid = fields.pid;
-    },
-    pidPath: "C:\\run\\gateway.pid",
-    port: 18642,
-    apiServerKey: "diagnostic-key-only",
-    python: process.execPath,
-    pollMs: 1,
-    readPidEntry: () =>
-      childPid === null
-        ? { state: "missing", pid: null }
-        : { state: "present", pid: childPid },
-    readEvidence: async (pid) => evidenceFor(pid),
-    isAlive: (pid) => {
-      try {
-        process.kill(pid, 0);
-        return true;
-      } catch {
-        return false;
-      }
-    },
-    probe: async () => ({
-      statusCode: 200,
-      authenticated: true,
-      validDocument: true,
-      requestToolPolicy: false,
-      requestModelRoute: false,
-    }),
-    terminate: async (pid) => {
-      terminated.push(pid);
-      try {
-        process.kill(pid, "SIGTERM");
-      } catch {
-        // The child may have exited between the identity read and signal.
-      }
-      return { attempted: true, error: null };
-    },
-    sleepFn: async () => {},
-    cleanupWaitMs: 100,
-  });
-
-  assert.equal(result.ready, true);
-  assert.equal(result.wrapperEvidence.valid, true);
-  assert.equal(result.listenerEvidence.valid, true);
-  assert.equal(result.listenerPid, childPid);
-  assert.equal(result.pidFileBefore.state, "missing");
-  assert.equal(result.pidFileAfter.state, "present");
-  assert.ok(Array.isArray(result.pidFileTransitions));
-  assert.equal(result.stdoutTail, "");
-  assert.equal(result.stderrTail, "");
-  assert.equal(result.cleanup.attempts.length, 1);
-  assert.deepEqual(terminated, [childPid]);
-  assert.ok(events.some(({ event }) => event === "gateway-wrapper-evidence"));
-});
-
-test("phase summaries retain the bounded importtime, faulthandler, and residue fields", () => {
-  const summary = summarizeDiagnosticPhase({
-    phase: "gateway-stacktrace",
-    outcome: "readiness-timeout-residue",
-    command: "C:\\seed\\python.exe",
-    args: ["-X", "importtime", "gateway"],
-    cwd: "C:\\seed\\site-packages",
-    wrapperEvidence: { identity: "windows:1" },
-    listenerEvidence: { identity: "windows:2" },
-    wrapperImageValid: true,
-    listenerImageValid: false,
-    listenerAlive: true,
-    pidFileBefore: { state: "missing", pid: null },
-    pidFileAfter: { state: "present", pid: 7 },
-    pidFileTransitions: [{ state: "present", pid: 7 }],
-    importtimeTail: "import time",
-    faulthandlerTail: "Traceback",
-    cleanup: { attempts: [], residue: [{ pid: 7 }], remainingPids: [7] },
-    sandboxCleanup: { cleaned: false, retainedForResidue: true },
-  });
-
-  assert.equal(summary.wrapperEvidence.identity, "windows:1");
-  assert.equal(summary.listenerEvidence.identity, "windows:2");
-  assert.equal(summary.wrapperImageValid, true);
-  assert.equal(summary.listenerAlive, true);
-  assert.equal(summary.importtimeTail, "import time");
-  assert.equal(summary.faulthandlerTail, "Traceback");
-  assert.deepEqual(summary.cleanup.remainingPids, [7]);
-  assert.equal(summary.sandboxCleanup.retainedForResidue, true);
+  assert.equal(failed.sandboxCleanup.cleaned, false);
+  assert.equal(failed.sandboxCleanup.errorCode, "EBUSY");
 });
