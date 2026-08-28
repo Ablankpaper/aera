@@ -320,6 +320,7 @@ jobs:
           $output = Join-Path $evidence "events.jsonl"
           $env:AERA_RUNTIME_HEALTH_DIAGNOSTIC_OUTPUT = $output
           $env:AGENTERA_E2E_DIAGNOSTICS = "1"
+          $env:AGENTERA_E2E_IMPORTTIME = "1"
           $env:AGENTERA_E2E_RUNTIME_CONTRACT_DIAGNOSTIC_OUTPUT = $output
           $env:AERA_RUNTIME_HEALTH_TIMEOUT_MS = "120000"
           npm test -- tests/runtime-health-diagnostics.test.ts --run --maxWorkers=1 --testTimeout=180000

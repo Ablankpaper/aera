@@ -484,10 +484,12 @@ function guardedImportScript(): string {
 
 function serveHelpProbeArgs(module: string): readonly string[] {
   const script = guardedModuleScript(module, ["serve", "--help"]);
-  // Diagnostic builds trace the import waterfall onto stderr so a stalled
-  // launch records the exact import it never completed. The flag changes
-  // only stderr noise; the probed behavior and stdout contract are identical.
-  return process.env.AGENTERA_E2E_DIAGNOSTICS === "1"
+  // Import tracing is an investigative probe, not part of the health gate.
+  // On a packaged Windows first launch it can materially change cold-start
+  // timing (and therefore make the gating command fail for the wrong reason).
+  // Keep it behind an explicit opt-in so ordinary acceptance diagnostics use
+  // the exact same command as production.
+  return process.env.AGENTERA_E2E_IMPORTTIME === "1"
     ? ["-I", "-B", "-X", "importtime", "-c", script]
     : ["-I", "-B", "-c", script];
 }
