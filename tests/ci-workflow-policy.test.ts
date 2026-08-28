@@ -76,6 +76,7 @@ describe("CI workflow policy", () => {
         "full",
         "windows-process-tree-diagnostic",
         "windows-managed-gateway-diagnostic",
+        "windows-runtime-health-diagnostic",
       ],
     });
     expect(workflow.jobs?.check?.if).toBe(
@@ -144,6 +145,35 @@ describe("CI workflow policy", () => {
           step.uses === "actions/upload-artifact@v4" &&
           step.with?.name ===
             "windows-managed-gateway-diagnostic-${{ github.run_id }}",
+      ),
+    ).toBe(true);
+
+    const runtimeHealth = workflow.jobs?.["windows-runtime-health-diagnostic"];
+    expect(runtimeHealth).toMatchObject({
+      if: "github.event_name == 'workflow_dispatch' && inputs.mode == 'windows-runtime-health-diagnostic'",
+      name: "windows-runtime-health-diagnostic",
+      "runs-on": "windows-2025",
+      "timeout-minutes": 25,
+    });
+    // This lane is a bounded, credential-free evidence run and must stay
+    // separate from required CI and all release/promotion jobs.
+    expect(runtimeHealth?.environment).toBeUndefined();
+    expect(JSON.stringify(runtimeHealth?.steps)).not.toContain("secrets.");
+    expect(
+      runtimeHealth?.steps?.some(
+        (step) =>
+          step.name === "Run extracted Runtime health lifecycle diagnostic" &&
+          step.run?.includes("tests/runtime-health-diagnostics.test.ts") ===
+            true,
+      ),
+    ).toBe(true);
+    expect(
+      runtimeHealth?.steps?.some(
+        (step) =>
+          step.name === "Upload Runtime health lifecycle evidence" &&
+          step.uses === "actions/upload-artifact@v4" &&
+          step.with?.name ===
+            "windows-runtime-health-diagnostic-${{ github.run_id }}",
       ),
     ).toBe(true);
   });

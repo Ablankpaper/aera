@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, type ChildProcess } from "node:child_process";
 import { appendFileSync } from "node:fs";
 import { lstat, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join } from "node:path";
@@ -33,6 +33,29 @@ export interface RuntimeHealthCommandOptions {
   env: NodeJS.ProcessEnv;
   timeoutMs: number;
   signal?: AbortSignal;
+  onLifecycle?: (event: RuntimeHealthCommandLifecycleEvent) => void;
+}
+
+export type RuntimeHealthCommandLifecycleType =
+  | "spawn"
+  | "timeout"
+  | "exit"
+  | "stdout-close"
+  | "stderr-close"
+  | "close"
+  | "callback";
+
+export interface RuntimeHealthCommandLifecycleEvent {
+  type: RuntimeHealthCommandLifecycleType;
+  pid: number | null;
+  code?: number | string | null;
+  signal?: string | null;
+  childAlive?: boolean | null;
+  childExited?: boolean;
+  childClosed?: boolean;
+  stdoutClosed?: boolean;
+  stderrClosed?: boolean;
+  killed?: boolean;
 }
 
 export type RuntimeHealthCommandRunner = (
@@ -84,6 +107,34 @@ class RuntimeHealthCommandError extends RuntimeHealthError {
   }
 }
 
+function safeChildPid(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0
+    ? value
+    : null;
+}
+
+function childAliveState(
+  child: ChildProcess,
+  pid: number | null,
+): boolean | null {
+  if (pid === null) return null;
+  if (child.exitCode !== null || child.signalCode !== null) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    const code =
+      error && typeof error === "object"
+        ? (error as { code?: unknown }).code
+        : undefined;
+    if (code === "ESRCH") return false;
+    // A Windows process can reject signal 0 even while the ChildProcess has
+    // not reported an exit. Preserve that uncertainty instead of claiming a
+    // dead child and hiding a possible inherited-handle stall.
+    return child.killed ? null : true;
+  }
+}
+
 function runtimeHealthDiagnostic(
   event: string,
   fields: Readonly<Record<string, boolean | number | string | null>> = {},
@@ -106,6 +157,12 @@ function runtimeHealthDiagnostic(
   } catch {
     // Diagnostic evidence must never change Runtime installation behavior.
   }
+}
+
+function runtimeHealthDiagnosticsEnabled(): boolean {
+  if (process.env.AGENTERA_E2E_DIAGNOSTICS !== "1") return false;
+  const output = process.env[HEALTH_DIAGNOSTIC_OUTPUT]?.trim();
+  return Boolean(output && isAbsolute(output));
 }
 
 const runtimeHealthDiagnosticStartedAt = Date.now();
@@ -197,7 +254,31 @@ function defaultRunner(
 ): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     const startedAt = Date.now();
-    execFile(
+    let childPid: number | null = null;
+    let childExited = false;
+    let childClosed = false;
+    let stdoutClosed = false;
+    let stderrClosed = false;
+    let lifecycleTimer: ReturnType<typeof setTimeout> | undefined;
+    let settled = false;
+    const childState: { current?: ChildProcess } = {};
+    const emit = (
+      type: RuntimeHealthCommandLifecycleType,
+      fields: Omit<RuntimeHealthCommandLifecycleEvent, "type" | "pid"> = {},
+    ): void => {
+      try {
+        options.onLifecycle?.({
+          type,
+          pid: childPid,
+          ...fields,
+        });
+      } catch {
+        // Diagnostic observers are strictly best-effort and must never alter
+        // the health result or child cleanup path.
+      }
+    };
+
+    const child: ChildProcess = execFile(
       executable,
       [...args],
       {
@@ -210,6 +291,20 @@ function defaultRunner(
         encoding: "utf8",
       },
       (error, stdout, stderr) => {
+        settled = true;
+        if (lifecycleTimer) clearTimeout(lifecycleTimer);
+        emit("callback", {
+          code: error ? safeProcessCode(error.code) : null,
+          signal: error ? safeProcessSignal(error.signal) : null,
+          childAlive: childState.current
+            ? childAliveState(childState.current, childPid)
+            : null,
+          childExited,
+          childClosed,
+          stdoutClosed,
+          stderrClosed,
+          killed: childState.current?.killed === true,
+        });
         if (error) {
           const code = safeProcessCode(error.code);
           const killed = error.killed === true;
@@ -239,6 +334,71 @@ function defaultRunner(
         resolve({ stdout, stderr });
       },
     );
+    childState.current = child;
+
+    childPid = safeChildPid(child.pid);
+    emit("spawn", {
+      childAlive: childAliveState(child, childPid),
+      killed: child.killed === true,
+    });
+    if (options.onLifecycle) {
+      child.once("exit", (code, signal) => {
+        childExited = true;
+        emit("exit", {
+          code: safeProcessCode(code),
+          signal: safeProcessSignal(signal),
+          childAlive: false,
+          killed: child?.killed === true,
+        });
+      });
+      child.stdout?.once("close", () => {
+        stdoutClosed = true;
+        emit("stdout-close", {
+          childAlive: child ? childAliveState(child, childPid) : null,
+          childExited,
+          childClosed,
+          stdoutClosed,
+          stderrClosed,
+          killed: child?.killed === true,
+        });
+      });
+      child.stderr?.once("close", () => {
+        stderrClosed = true;
+        emit("stderr-close", {
+          childAlive: child ? childAliveState(child, childPid) : null,
+          childExited,
+          childClosed,
+          stdoutClosed,
+          stderrClosed,
+          killed: child?.killed === true,
+        });
+      });
+      child.once("close", (code, signal) => {
+        childClosed = true;
+        emit("close", {
+          code: safeProcessCode(code),
+          signal: safeProcessSignal(signal),
+          childAlive: false,
+          childExited,
+          childClosed,
+          stdoutClosed,
+          stderrClosed,
+          killed: child?.killed === true,
+        });
+      });
+      if (!settled) {
+        lifecycleTimer = setTimeout(() => {
+          emit("timeout", {
+            childAlive: childAliveState(child, childPid),
+            childExited,
+            childClosed,
+            stdoutClosed,
+            stderrClosed,
+            killed: child.killed === true,
+          });
+        }, options.timeoutMs);
+      }
+    }
   });
 }
 
@@ -408,6 +568,62 @@ export async function runIsolatedRuntimeHealthCheck({
     for (const [index, command] of commands.entries()) {
       const probe = index + 1;
       const probeStartedAt = Date.now();
+      const lifecycleState = {
+        childPid: null as number | null,
+        childExited: false,
+        childClosed: false,
+        stdoutClosed: false,
+        stderrClosed: false,
+        childAliveAtTimeout: null as boolean | null,
+        timeoutAt: null as number | null,
+        callbackAt: null as number | null,
+      };
+      const onLifecycle = runtimeHealthDiagnosticsEnabled()
+        ? (event: RuntimeHealthCommandLifecycleEvent): void => {
+            if (event.pid !== null) lifecycleState.childPid = event.pid;
+            if (event.type === "exit") lifecycleState.childExited = true;
+            if (event.type === "close") lifecycleState.childClosed = true;
+            if (event.type === "stdout-close")
+              lifecycleState.stdoutClosed = true;
+            if (event.type === "stderr-close")
+              lifecycleState.stderrClosed = true;
+            if (event.type === "timeout") {
+              lifecycleState.childAliveAtTimeout = event.childAlive ?? null;
+              lifecycleState.timeoutAt = Date.now();
+            }
+            if (event.type === "callback")
+              lifecycleState.callbackAt = Date.now();
+
+            const fields: Record<string, boolean | number | string | null> = {
+              probe,
+              name: command.name,
+              executable: basename(python),
+              childPid: event.pid,
+              childElapsedMs: Date.now() - probeStartedAt,
+              childAlive: event.childAlive ?? null,
+              childExited: event.childExited ?? lifecycleState.childExited,
+              childClosed: event.childClosed ?? lifecycleState.childClosed,
+              stdoutClosed: event.stdoutClosed ?? lifecycleState.stdoutClosed,
+              stderrClosed: event.stderrClosed ?? lifecycleState.stderrClosed,
+              killed: event.killed ?? false,
+            };
+            if (event.type === "exit" || event.type === "close") {
+              fields.exitCode = event.code ?? null;
+              fields.signal = event.signal ?? null;
+            }
+            if (event.type === "callback") {
+              fields.callbackErrorCode = event.code ?? null;
+              fields.callbackSignal = event.signal ?? null;
+              fields.callbackKilled = event.killed ?? false;
+              fields.callbackDelayAfterTimeoutMs =
+                lifecycleState.timeoutAt === null
+                  ? null
+                  : Date.now() - lifecycleState.timeoutAt;
+            }
+            if (event.type === "timeout") fields.timedOut = true;
+            runtimeHealthDiagnostic(`health-probe-child-${event.type}`, fields);
+          }
+        : undefined;
       runtimeHealthDiagnostic("health-probe-start", {
         probe,
         name: command.name,
@@ -421,6 +637,7 @@ export async function runIsolatedRuntimeHealthCheck({
           env,
           timeoutMs: probeTimeoutMs,
           signal,
+          onLifecycle,
         });
       } catch (error) {
         const probeElapsedMs = Date.now() - probeStartedAt;
@@ -443,6 +660,17 @@ export async function runIsolatedRuntimeHealthCheck({
           stderrClass: failure.stderrClass,
           stderrTail: failure.stderrTail,
           stderrBytes: failure.stderrBytes,
+          childPid: lifecycleState.childPid,
+          childExited: lifecycleState.childExited,
+          childClosed: lifecycleState.childClosed,
+          stdoutClosed: lifecycleState.stdoutClosed,
+          stderrClosed: lifecycleState.stderrClosed,
+          childAliveAtTimeout: lifecycleState.childAliveAtTimeout,
+          callbackDelayAfterTimeoutMs:
+            lifecycleState.timeoutAt === null ||
+            lifecycleState.callbackAt === null
+              ? null
+              : lifecycleState.callbackAt - lifecycleState.timeoutAt,
         });
         throw error;
       }
