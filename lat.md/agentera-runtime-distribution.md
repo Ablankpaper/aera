@@ -130,11 +130,19 @@ Focused Node tests lock the managed invocation contract and the fail-closed evid
 
 ##### Invocation and phase boundaries
 
-The diagnostic environment keeps fake home/API-server inputs and excludes inherited Python roots, CI markers, credentials, and probe-only overrides; phase argv and the single timeout stacktrace branch match Desktop dispatch.
+The diagnostic environment keeps fake home/API-server inputs and excludes inherited Python roots, CI markers, credentials, and probe-only overrides.
+
+The bind host lives in the materialized `config.yaml`, never in the spawn environment, and the managed PATH prepends only the selected interpreter directory. Phase argv and the single timeout stacktrace branch match Desktop dispatch, with an optional `--profile` selector placed before the gateway command.
 
 ##### Evidence and fail-closed cleanup
 
-Evidence retries only transient provider misses; readiness requires a verified listener plus authenticated capabilities; cleanup preserves PID transitions, mismatches, tails, and live residue instead of signalling an unverified PID.
+Evidence retries only transient provider misses within a bounded attempt count; valid evidence returns without retry. Readiness requires a verified listener plus authenticated capabilities.
+
+Cleanup terminates only identity-verified wrapper/listener PIDs and never signals a pre-launch stale PID, even while alive.
+
+It preserves PID transitions, identity mismatches, import-time and faulthandler tails, and live residue; a sandbox with residual PIDs is retained and reports its reason, so `EBUSY` cannot erase the first-failure evidence.
+
+The phase summary retains wrapper/listener evidence, pid-file transitions, capabilities, tails, cleanup attempts, and sandbox outcome for the emitted artifact.
 
 Dashboard startup is fail-closed: if the shared primary-Gateway recovery returns false, it returns `running:false` before allocating a Dashboard token or port and before spawning another Runtime Python process.
 
