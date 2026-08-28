@@ -1,4 +1,4 @@
-import { ChildProcess, spawn } from "child_process";
+import { ChildProcess, execFile, spawn } from "child_process";
 import { randomUUID } from "crypto";
 import {
   existsSync,
@@ -4584,6 +4584,32 @@ function gatewayReadyTimeoutMs(): number {
     : DEFAULT_GATEWAY_READY_TIMEOUT_MS;
 }
 
+function sampleGatewayWrapperCpuSeconds(pid: number): Promise<number | null> {
+  if (process.platform !== "win32") return Promise.resolve(null);
+  const safePid = Number.isSafeInteger(pid) && pid > 0 ? Math.floor(pid) : null;
+  if (safePid === null) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    execFile(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        `$p = Get-Process -Id ${safePid} -ErrorAction SilentlyContinue; if ($p) { $p.CPU } else { "" }`,
+      ],
+      { timeout: 3_000, windowsHide: true },
+      (error, stdout) => {
+        if (error) {
+          resolve(null);
+          return;
+        }
+        const value = Number(String(stdout).trim());
+        resolve(Number.isFinite(value) ? value : null);
+      },
+    );
+  });
+}
+
 function readGatewayLogTail(logPath: string | undefined): string | undefined {
   if (!logPath) return undefined;
   let fd: number | null = null;
@@ -4637,6 +4663,8 @@ async function waitForGatewayServing(
   listenerEvidence: ProcessIdentityEvidence | null;
 }> {
   const deadline = Date.now() + timeoutMs;
+  let lastWrapperCpuSampleAt = 0;
+  let lastWrapperCpuSeconds: number | null = null;
   for (;;) {
     // A pid file alone is not evidence: the listener PID must parse, differ
     // from the pre-launch stale pid, and resolve to a live Python process.
@@ -4666,6 +4694,22 @@ async function waitForGatewayServing(
         preparedApiServerPort,
       );
     }
+    // Diagnostic-only wrapper liveness/CPU curve: distinguishes a slow
+    // cold-start (CPU accumulating) from a hung wrapper (CPU flat) on the
+    // next packaged candidate. Bounded to one PowerShell sample per 4s.
+    let wrapperAlive: boolean | null = null;
+    if (launchPid !== null && launchPid !== undefined) {
+      wrapperAlive = pidIsAliveAs(launchPid, GATEWAY_IMAGE_PREFIXES);
+      const now = Date.now();
+      if (
+        process.env.AGENTERA_E2E_DIAGNOSTICS === "1" &&
+        now - lastWrapperCpuSampleAt >= 4_000
+      ) {
+        lastWrapperCpuSampleAt = now;
+        const cpu = await sampleGatewayWrapperCpuSeconds(launchPid);
+        if (cpu !== null) lastWrapperCpuSeconds = cpu;
+      }
+    }
     gatewayReadinessDiagnostic("poll", {
       candidatePid: candidate,
       candidateIsPreLaunch,
@@ -4675,6 +4719,9 @@ async function waitForGatewayServing(
       identityValid: listenerEvidence !== null,
       apiProbeAttempted,
       apiReady,
+      wrapperPid: launchPid ?? null,
+      wrapperAlive,
+      wrapperCpuSeconds: lastWrapperCpuSeconds,
     });
     if (listenerPid !== null && apiReady) {
       return { ready: true, listenerPid, listenerEvidence };
