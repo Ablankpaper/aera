@@ -72,7 +72,11 @@ describe("CI workflow policy", () => {
       required: true,
       default: "full",
       type: "choice",
-      options: ["full", "windows-process-tree-diagnostic", "windows-serve-help-diagnostic"],
+      options: [
+        "full",
+        "windows-process-tree-diagnostic",
+        "windows-managed-gateway-diagnostic",
+      ],
     });
     expect(workflow.jobs?.check?.if).toBe(
       "github.event_name != 'workflow_dispatch' || inputs.mode == 'full'",
@@ -114,15 +118,44 @@ describe("CI workflow policy", () => {
       },
     ]);
 
-    const serveHelp = workflow.jobs?.["windows-serve-help-diagnostic"];
-    expect(serveHelp).toMatchObject({
-      if: "github.event_name == 'workflow_dispatch' && inputs.mode == 'windows-serve-help-diagnostic'",
-      name: "windows-serve-help-diagnostic",
-      "runs-on": "windows-latest",
+    const managedGateway =
+      workflow.jobs?.["windows-managed-gateway-diagnostic"];
+    expect(managedGateway).toMatchObject({
+      if: "github.event_name == 'workflow_dispatch' && inputs.mode == 'windows-managed-gateway-diagnostic'",
+      name: "windows-managed-gateway-diagnostic",
+      "runs-on": "windows-2025",
     });
     // Dispatch-only and credential-free: no environment, no secrets, and no
     // release/deploy steps can follow from a diagnostic run.
-    expect(serveHelp?.environment).toBeUndefined();
-    expect(JSON.stringify(serveHelp?.steps)).not.toContain("secrets.");
+    expect(managedGateway?.environment).toBeUndefined();
+    expect(JSON.stringify(managedGateway?.steps)).not.toContain("secrets.");
+    expect(
+      managedGateway?.steps?.some(
+        (step) =>
+          step.name === "Diagnose the managed Gateway launch path" &&
+          step.run?.includes("scripts/diagnose-windows-serve-help.mjs") ===
+            true,
+      ),
+    ).toBe(true);
+    expect(
+      managedGateway?.steps?.some(
+        (step) =>
+          step.name === "Upload managed Gateway diagnostic evidence" &&
+          step.uses === "actions/upload-artifact@v4" &&
+          step.with?.name ===
+            "windows-managed-gateway-diagnostic-${{ github.run_id }}",
+      ),
+    ).toBe(true);
+  });
+
+  it("runs the managed Gateway diagnostic contract in ordinary platform CI", () => {
+    const step = readWorkflow().jobs?.check?.steps?.find(
+      (candidate) =>
+        candidate.name === "Test managed Gateway diagnostic contract",
+    );
+    expect(step).toEqual({
+      name: "Test managed Gateway diagnostic contract",
+      run: "node --test scripts/diagnose-windows-serve-help.test.mjs",
+    });
   });
 });
