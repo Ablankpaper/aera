@@ -642,6 +642,11 @@ describe("startGatewayWithReadiness", () => {
     expect(events).not.toContain("generated-internal-token");
     expect(events).toContain('"identityAvailable":false');
     expect(events).toContain('"apiProbeAttempted":false');
+    // The wrapper liveness/CPU curve is part of every poll so a stalled
+    // packaged launch can be told apart (busy cold-start vs hung wrapper).
+    expect(events).toContain(`"wrapperPid":${process.pid}`);
+    expect(events).toContain('"wrapperAlive":false');
+    expect(events).toContain('"wrapperCpuSeconds":null');
   });
 
   it("still cleans up the listener when the wrapper exits before the deadline", async () => {
