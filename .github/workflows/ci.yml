@@ -18,7 +18,7 @@ on:
         options:
           - full
           - windows-process-tree-diagnostic
-          - windows-serve-help-diagnostic
+          - windows-managed-gateway-diagnostic
 
 permissions:
   contents: read
@@ -64,6 +64,9 @@ jobs:
           scripts/internal-beta/inspect-diagnostic-identity.test.mjs
           scripts/internal-beta/package-diagnostic-collectors.test.mjs
           scripts/internal-beta/workflow-artifact-kinds.test.mjs
+
+      - name: Test managed Gateway diagnostic contract
+        run: node --test scripts/diagnose-windows-serve-help.test.mjs
 
       - name: Verify pinned Aera cloud contract
         run: npm run check:agentera-cloud-contract
@@ -208,10 +211,10 @@ jobs:
           --testTimeout=20000
           --reporter=verbose
 
-  windows-serve-help-diagnostic:
-    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'windows-serve-help-diagnostic'
-    name: windows-serve-help-diagnostic
-    runs-on: windows-latest
+  windows-managed-gateway-diagnostic:
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'windows-managed-gateway-diagnostic'
+    name: windows-managed-gateway-diagnostic
+    runs-on: windows-2025
     timeout-minutes: 35
     steps:
       - name: Checkout
@@ -239,18 +242,18 @@ jobs:
           "SEED_EXTRACT_ROOT=$dest" >> $env:GITHUB_ENV
           "SEED_MANIFEST=$($manifest.FullName)" >> $env:GITHUB_ENV
 
-      - name: Diagnose the serve --help launch path
+      - name: Diagnose the managed Gateway launch path
         run: >-
           node scripts/diagnose-windows-serve-help.mjs
           --runtime-root "$env:SEED_EXTRACT_ROOT"
           --manifest "$env:SEED_MANIFEST"
-          --output "$env:RUNNER_TEMP/serve-help-diagnostic.jsonl"
+          --output "$env:RUNNER_TEMP/managed-gateway-diagnostic.jsonl"
 
-      - name: Upload serve-help diagnostic evidence
+      - name: Upload managed Gateway diagnostic evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: windows-serve-help-diagnostic
-          path: ${{ runner.temp }}/serve-help-diagnostic.jsonl
+          name: windows-managed-gateway-diagnostic-${{ github.run_id }}
+          path: ${{ runner.temp }}/managed-gateway-diagnostic.jsonl
           if-no-files-found: warn
           retention-days: 14

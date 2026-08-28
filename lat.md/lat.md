@@ -15,7 +15,7 @@ This directory defines the high-level concepts, business logic, and architecture
 - [[system-locale]] — first-use operating-system language selection, locale normalization, and saved-preference precedence.
 - [[agentera-self-evolution]] — the release-blocking Hermes compatibility rule, local self-learning boundary, immutable Agent versions, and explicit candidate-promotion path.
 - [[multi-agent-memory]] — per-Agent identity and private Hermes learning, the account-wide behavior profile, and durable conversation snapshot rules.
-- [[agentera-runtime-distribution]] — the signed platform-specific Runtime seed, offline first installation, user-confirmed updates, rollback, and Profile-data isolation.
+- [[agentera-runtime-distribution]] — the signed platform-specific Runtime seed, offline first installation, user-confirmed updates, rollback, Profile-data isolation, and the bounded Windows managed-Gateway diagnostic.
 - [[agentera-app-authentication]] — the independent AgentEra APP account gate, browser PKCE flow, device-bound offline entitlement, and existing-Profile ownership rules.
 - [[agentera-desktop-control]] — authenticated Desktop heartbeat, fixed health checks, idempotent result delivery, and the renderer privacy boundary used by internal fleet operations.
 - [[agentera-agent-control-plane]] — USER-owned local Agent drafts, immutable stable-version publication, per-device Agent installation, and conversation-scoped RuntimeBinding rules.

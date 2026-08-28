@@ -116,6 +116,26 @@ A spawned Gateway process is never reported as serving on process identity alone
 
 A readiness timeout terminates what the launch actually left behind: the wrapper child while it lives, and the verified listener pid from `gateway.pid` once the short-lived wrapper has exited — both with the same bounded force escalation as ordinary shutdown. Durable ownership transfers atomically from the exact recorded wrapper PID to a fresh, live Python listener PID that differs from the pre-launch snapshot, with separate identity/image proof for a cross-PID hand-off; a changed pid file while that wrapper remains live is an unverified replacement and is never adopted or signalled. A same-PID Windows foreground launch uses the listener proof for the tracked wrapper only after strict PID equality and a fresh identity/image re-read. App shutdown uses the PID-only tree terminator for an adopted cross-PID listener and the identity-bound child terminator for a same-PID listener. A Gateway the call did not spawn is reported, never killed. The result carries the listener PID (not the short-lived wrapper's), the launch command, the wrapper's exit code or signal when it died, a bounded stderr tail, and the parsed capabilities document as evidence. Feature flags remain evidence for the caller's acceptance check and never gate readiness, so an older Runtime still counts as serving. Regression fixtures that launch a real child use a separate bounded scheduler allowance to publish `gateway.pid`; this does not change the production readiness deadline.
 
+#### Managed Gateway diagnostic
+
+The workflow-dispatch Windows diagnostic reproduces the packaged Desktop managed Gateway boundary and stops at the first unresolved import or initialization phase.
+
+The diagnostic's six bounded phases use the same packaged Python, managed site-packages working directory, optional Profile selector, and one diagnostic-only `-X importtime` flag. The final phase is the exact `python -m hermes_cli.main gateway` dispatch; `gateway-stacktrace` is appended only after its readiness timeout and enables bounded `faulthandler` output.
+
+The managed environment follows [[src/main/hermes.ts#buildGatewayEnv]] while replacing only the physical home and API-server key/port with disposable values. Process evidence retries only empty, timeout, query-error, or invalid-JSON Windows queries; a complete PID, creation identity, image, executable path, and command line remains required, and an identity mismatch is terminal. The diagnostic retains wrapper/listener evidence, every `gateway.pid` transition, authenticated capabilities results, import-time and faulthandler tails, cleanup attempts, and residual PIDs. A live or unverified process keeps its sandbox, so `EBUSY` cannot erase the first-failure evidence.
+
+#### Managed Gateway diagnostic test specifications
+
+Focused Node tests lock the managed invocation contract and the fail-closed evidence boundary used before any new packaged candidate is attempted.
+
+##### Invocation and phase boundaries
+
+The diagnostic environment keeps fake home/API-server inputs and excludes inherited Python roots, CI markers, credentials, and probe-only overrides; phase argv and the single timeout stacktrace branch match Desktop dispatch.
+
+##### Evidence and fail-closed cleanup
+
+Evidence retries only transient provider misses; readiness requires a verified listener plus authenticated capabilities; cleanup preserves PID transitions, mismatches, tails, and live residue instead of signalling an unverified PID.
+
 Dashboard startup is fail-closed: if the shared primary-Gateway recovery returns false, it returns `running:false` before allocating a Dashboard token or port and before spawning another Runtime Python process.
 
 Local `gateway-status` answers from an authenticated readiness probe instead of process liveness, and the Gateway screen consumes `ready`, so neither surface can present a cold-starting process as a running Gateway. SSH start, restart, and status resolve the selected Profile's api-server port and require the remote `/health` probe; PID/systemd liveness is necessary but never sufficient, and the zero-retry status path still performs exactly one API probe.
