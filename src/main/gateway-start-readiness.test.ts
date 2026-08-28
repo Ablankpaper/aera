@@ -646,7 +646,12 @@ describe("startGatewayWithReadiness", () => {
     // packaged launch can be told apart (busy cold-start vs hung wrapper).
     expect(events).toContain(`"wrapperPid":${process.pid}`);
     expect(events).toContain('"wrapperAlive":false');
-    expect(events).toContain('"wrapperCpuSeconds":null');
+    if (process.platform === "win32") {
+      // Windows samples the wrapper's real CPU seconds via PowerShell.
+      expect(events).toMatch(/"wrapperCpuSeconds":(?:\d+(?:\.\d+)?|null)/u);
+    } else {
+      expect(events).toContain('"wrapperCpuSeconds":null');
+    }
   });
 
   it("still cleans up the listener when the wrapper exits before the deadline", async () => {
