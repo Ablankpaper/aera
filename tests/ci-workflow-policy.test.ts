@@ -77,6 +77,7 @@ describe("CI workflow policy", () => {
         "windows-process-tree-diagnostic",
         "windows-managed-gateway-diagnostic",
         "windows-runtime-health-diagnostic",
+        "windows-packaged-acceptance",
       ],
     });
     expect(workflow.jobs?.check?.if).toBe(

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { execFile } from "node:child_process";
 import { createServer } from "node:net";
 import { appendFileSync } from "node:fs";
 import {
@@ -8,6 +9,7 @@ import {
   readdir,
   realpath,
   rm,
+  stat,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -29,11 +31,13 @@ import {
   inspectInstalledRuntimeContract,
   inspectLiveGatewayEndpoint,
   inspectLiveGatewayProcess,
+  parseWindowsGatewayProcessSamples,
   probeRuntimeCapabilities,
   readRedactedGatewayLogTail,
   redactGatewayDiagnosticTail,
   type LiveGatewayEndpointEvidence,
   type LiveGatewayProcessEvidence,
+  type WindowsGatewayProcessSample,
 } from "./support/agentera-runtime-contract-evidence";
 
 const SHA1_PATTERN = /^[0-9a-f]{40}$/u;
@@ -58,7 +62,29 @@ let temporaryRoot = "";
 let diagnosticOutput: string | null = null;
 let diagnosticStartedAt = 0;
 let electronStderrTail = "";
+let electronStderrCapture = "";
+let gatewayLaunchObserver: GatewayLaunchObserver | null = null;
 const MAIN_PROCESS_STDERR_READ_CHARS = 16_384;
+const MAX_CAPTURED_ELECTRON_STDERR_CHARS = 512 * 1024;
+const EXTERNAL_GATEWAY_OBSERVER_INTERVAL_MS = 5_000;
+const EXTERNAL_GATEWAY_OBSERVER_TIMEOUT_MS = 4_000;
+const EXTERNAL_GATEWAY_OBSERVER_MAX_OUTPUT_BYTES = 512 * 1024;
+const PROFILE_STAGE_FILES = [
+  ".env",
+  "config.yaml",
+  "gateway.pid",
+  "gateway-stderr.log",
+  "state.db",
+  "state.db-wal",
+  "state.db-shm",
+  "gateway.lock",
+  ".gateway.lock",
+  "skills/.bundled_manifest",
+  "skills/.bundled_manifest.tmp",
+  "logs/gateway.log",
+  "logs/errors.log",
+  "logs/gateway-exit-diag.log",
+] as const;
 
 function runtimeContractDiagnostic(
   event: string,
@@ -81,6 +107,24 @@ function runtimeContractDiagnostic(
   }
 }
 
+async function writeDiagnosticArtifact(
+  filename: string,
+  content: string,
+): Promise<void> {
+  if (diagnosticOutput === null) return;
+  try {
+    await writeFile(join(dirname(diagnosticOutput), filename), content, {
+      encoding: "utf8",
+      mode: 0o600,
+    });
+  } catch (error) {
+    runtimeContractDiagnostic("diagnostic-artifact-write-failed", {
+      filename,
+      failure: diagnosticErrorClass(error),
+    });
+  }
+}
+
 function diagnosticErrorClass(error: unknown): string {
   if (error && typeof error === "object") {
     const code = (error as { code?: unknown }).code;
@@ -96,10 +140,357 @@ function diagnosticErrorClass(error: unknown): string {
     : "unknown";
 }
 
+interface ExternalCommandResult {
+  status: number | null;
+  stdout: string;
+  stderr: string;
+}
+
+function runExternalCommand(
+  file: string,
+  args: readonly string[],
+  options: Readonly<Record<string, unknown>>,
+): Promise<ExternalCommandResult> {
+  return new Promise((resolveCommand) => {
+    execFile(file, [...args], options as never, (error, stdout, stderr) => {
+      const code = error && typeof error.code === "number" ? error.code : null;
+      resolveCommand({
+        status: error === null ? 0 : code,
+        stdout: String(stdout ?? ""),
+        stderr: String(stderr ?? ""),
+      });
+    });
+  });
+}
+
+const WINDOWS_GATEWAY_PROCESS_QUERY = `
+$ErrorActionPreference = 'Stop'
+$rows = @(Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object {
+  $_.Name -match '^(python|pythonw)\\.exe$' -and
+  $_.CommandLine -match 'hermes_cli\\.main|gateway'
+})
+if ($rows.Count -eq 0) {
+  '[]'
+} else {
+  $rows | ForEach-Object {
+    [ordered]@{
+      ProcessId = [int]$_.ProcessId
+      ParentProcessId = [int]$_.ParentProcessId
+      Name = $_.Name
+      ExecutablePath = $_.ExecutablePath
+      CommandLine = $_.CommandLine
+      CreationFileTimeUtc = if ($_.CreationDate) {
+        $_.CreationDate.ToFileTimeUtc().ToString([Globalization.CultureInfo]::InvariantCulture)
+      } else { $null }
+      KernelModeTime100ns = $_.KernelModeTime
+      UserModeTime100ns = $_.UserModeTime
+      WorkingSetBytes = $_.WorkingSetSize
+      ThreadCount = $_.ThreadCount
+    }
+  } | ConvertTo-Json -Compress
+}`;
+
+function normalizedDiagnosticPath(value: string | null | undefined): string {
+  return String(value ?? "")
+    .trim()
+    .replaceAll("\\", "/")
+    .toLowerCase();
+}
+
+function processUsesGatewayCommand(
+  sample: WindowsGatewayProcessSample,
+): boolean {
+  const command = (sample.commandLine ?? "").toLowerCase();
+  return command.includes("hermes_cli.main") && command.includes("gateway");
+}
+
+function processMatchesInstalledPython(
+  sample: WindowsGatewayProcessSample,
+  pythonExecutable: string,
+): boolean {
+  const expected = normalizedDiagnosticPath(pythonExecutable);
+  const observed = normalizedDiagnosticPath(sample.executablePath);
+  return Boolean(expected && observed === expected);
+}
+
+async function queryWindowsGatewayProcesses(
+  pythonExecutable: string,
+): Promise<WindowsGatewayProcessSample[]> {
+  const result = await runExternalCommand(
+    "powershell.exe",
+    [
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      WINDOWS_GATEWAY_PROCESS_QUERY,
+    ],
+    {
+      encoding: "utf8",
+      timeout: EXTERNAL_GATEWAY_OBSERVER_TIMEOUT_MS,
+      maxBuffer: EXTERNAL_GATEWAY_OBSERVER_MAX_OUTPUT_BYTES,
+      windowsHide: true,
+    },
+  );
+  if (result.status !== 0) {
+    throw new Error("Windows Gateway process sample query failed");
+  }
+  return parseWindowsGatewayProcessSamples(result).filter(
+    (sample) =>
+      processMatchesInstalledPython(sample, pythonExecutable) ||
+      processUsesGatewayCommand(sample),
+  );
+}
+
+type ProfileStageFact = {
+  exists: boolean;
+  sizeBytes: number | null;
+  mtimeMs: number | null;
+  error: string | null;
+};
+
+async function readProfileStageFacts(
+  profilePath: string,
+): Promise<Record<string, ProfileStageFact>> {
+  const entries = await Promise.all(
+    PROFILE_STAGE_FILES.map(async (relativePath) => {
+      try {
+        const metadata = await stat(join(profilePath, relativePath));
+        return [
+          relativePath,
+          {
+            exists: true,
+            sizeBytes: metadata.size,
+            mtimeMs: Math.round(metadata.mtimeMs),
+            error: null,
+          },
+        ] as const;
+      } catch (error) {
+        const code =
+          error && typeof error === "object" && "code" in error
+            ? String((error as { code?: unknown }).code ?? "error")
+            : "error";
+        return [
+          relativePath,
+          { exists: false, sizeBytes: null, mtimeMs: null, error: code },
+        ] as const;
+      }
+    }),
+  );
+  return Object.fromEntries(entries);
+}
+
+function compactDiagnosticJson(value: unknown, maxChars = 6_000): string {
+  try {
+    return JSON.stringify(value).slice(0, maxChars);
+  } catch {
+    return "<unserializable>";
+  }
+}
+
+function sanitizedProcessSample(
+  sample: WindowsGatewayProcessSample,
+  privateRoots: readonly string[],
+  pythonExecutable: string,
+): Record<string, boolean | number | string | null> {
+  const command = sample.commandLine
+    ? redactGatewayDiagnosticTail(sample.commandLine, privateRoots)
+    : null;
+  return {
+    pid: sample.pid,
+    parentPid: sample.parentPid,
+    image: sample.name,
+    executableMatchesInstalled: processMatchesInstalledPython(
+      sample,
+      pythonExecutable,
+    ),
+    creationIdentity: sample.creationIdentity,
+    cpuSeconds: sample.cpuSeconds,
+    workingSetBytes: sample.workingSetBytes,
+    threadCount: sample.threadCount,
+    commandShape: command,
+    commandHasHermesMain: Boolean(
+      sample.commandLine?.toLowerCase().includes("hermes_cli.main"),
+    ),
+    commandHasGateway: Boolean(
+      sample.commandLine?.toLowerCase().includes("gateway"),
+    ),
+  };
+}
+
+interface GatewayLaunchObserver {
+  stop(): Promise<void>;
+}
+
+function startGatewayLaunchObserver(options: {
+  profilePath: string;
+  pythonExecutable: string;
+  privateRoots: readonly string[];
+}): GatewayLaunchObserver {
+  let stopped = false;
+  let sampleNumber = 0;
+  let inFlight: Promise<void> | null = null;
+  let unsupportedReported = false;
+
+  const collect = async (): Promise<void> => {
+    sampleNumber += 1;
+    const pidFile = await inspectGatewayPidFile(options.profilePath);
+    const stageFacts = await readProfileStageFacts(options.profilePath);
+    if (process.platform !== "win32") {
+      if (!unsupportedReported) {
+        unsupportedReported = true;
+        runtimeContractDiagnostic("gateway-external-observer-unsupported", {
+          platform: process.platform,
+        });
+      }
+      runtimeContractDiagnostic("gateway-profile-stage-sample", {
+        sample: sampleNumber,
+        pidFileStatus: pidFile.status,
+        pid: pidFile.pid,
+        files: compactDiagnosticJson(stageFacts),
+      });
+      return;
+    }
+
+    let samples: WindowsGatewayProcessSample[];
+    try {
+      samples = await queryWindowsGatewayProcesses(options.pythonExecutable);
+    } catch (error) {
+      runtimeContractDiagnostic("gateway-external-observer-failed", {
+        sample: sampleNumber,
+        failure: diagnosticErrorClass(error),
+      });
+      return;
+    }
+    runtimeContractDiagnostic("gateway-external-observer-sample", {
+      sample: sampleNumber,
+      pidFileStatus: pidFile.status,
+      pid: pidFile.pid,
+      processCount: samples.length,
+      pids: samples.map((sample) => sample.pid).join(","),
+    });
+    for (const sample of samples) {
+      const safe = sanitizedProcessSample(
+        sample,
+        options.privateRoots,
+        options.pythonExecutable,
+      );
+      runtimeContractDiagnostic("gateway-external-process-sample", {
+        sample: sampleNumber,
+        ...safe,
+      });
+    }
+    runtimeContractDiagnostic("gateway-profile-stage-sample", {
+      sample: sampleNumber,
+      pidFileStatus: pidFile.status,
+      pid: pidFile.pid,
+      files: compactDiagnosticJson(stageFacts),
+    });
+  };
+
+  const tick = (): void => {
+    if (stopped || inFlight !== null) return;
+    inFlight = collect()
+      .catch((error) => {
+        runtimeContractDiagnostic("gateway-external-observer-failed", {
+          sample: sampleNumber,
+          failure: diagnosticErrorClass(error),
+        });
+      })
+      .finally(() => {
+        inFlight = null;
+      });
+  };
+
+  const timer = setInterval(tick, EXTERNAL_GATEWAY_OBSERVER_INTERVAL_MS);
+  timer.unref?.();
+  tick();
+
+  return {
+    async stop(): Promise<void> {
+      stopped = true;
+      clearInterval(timer);
+      if (inFlight !== null) await inFlight;
+      // One final snapshot catches a PID file/exit transition between the
+      // last interval and the readiness call's resolution.
+      try {
+        await collect();
+      } catch (error) {
+        runtimeContractDiagnostic("gateway-external-observer-failed", {
+          sample: sampleNumber,
+          failure: diagnosticErrorClass(error),
+        });
+      }
+    },
+  };
+}
+
+async function collectBoundedRelativeInventory(
+  root: string,
+  maxEntries = 512,
+): Promise<readonly Record<string, boolean | number | string | null>[]> {
+  const entries: Array<Record<string, boolean | number | string | null>> = [];
+  const queue: Array<{ directory: string; depth: number }> = [
+    { directory: root, depth: 0 },
+  ];
+  while (queue.length > 0 && entries.length < maxEntries) {
+    const current = queue.shift();
+    if (!current) break;
+    let children;
+    try {
+      children = await readdir(current.directory, { withFileTypes: true });
+    } catch (error) {
+      entries.push({
+        path: relative(root, current.directory).split(sep).join("/") || ".",
+        directory: true,
+        error: diagnosticErrorClass(error),
+      });
+      continue;
+    }
+    children.sort((left, right) => left.name.localeCompare(right.name));
+    for (const child of children) {
+      if (entries.length >= maxEntries) break;
+      const childPath = join(current.directory, child.name);
+      const relativePath = relative(root, childPath).split(sep).join("/");
+      if (child.isSymbolicLink()) {
+        entries.push({ path: relativePath, kind: "symlink" });
+        continue;
+      }
+      if (child.isDirectory()) {
+        entries.push({ path: relativePath, kind: "directory" });
+        if (current.depth < 4) {
+          queue.push({ directory: childPath, depth: current.depth + 1 });
+        }
+        continue;
+      }
+      try {
+        const metadata = await stat(childPath);
+        entries.push({
+          path: relativePath,
+          kind: "file",
+          sizeBytes: metadata.size,
+          mtimeMs: Math.round(metadata.mtimeMs),
+        });
+      } catch (error) {
+        entries.push({
+          path: relativePath,
+          kind: "file",
+          sizeBytes: null,
+          mtimeMs: null,
+          error: diagnosticErrorClass(error),
+        });
+      }
+    }
+  }
+  return entries;
+}
+
 function appendElectronStderr(chunk: unknown): void {
   const value = Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
   electronStderrTail = `${electronStderrTail}${value}`.slice(
     -MAIN_PROCESS_STDERR_READ_CHARS,
+  );
+  electronStderrCapture = `${electronStderrCapture}${value}`.slice(
+    -MAX_CAPTURED_ELECTRON_STDERR_CHARS,
   );
 }
 
@@ -382,6 +773,9 @@ async function recordGatewayFailureEvidence(options: {
   profilePath: string;
   logPath: string | undefined;
   privateRoots: readonly string[];
+  pythonExecutable?: string;
+  versionRoot?: string;
+  userDataPath?: string;
 }): Promise<void> {
   const pidFile = await inspectGatewayPidFile(options.profilePath);
   const gatewayStatus = page
@@ -399,25 +793,112 @@ async function recordGatewayFailureEvidence(options: {
     hasLogPath: Boolean(options.logPath),
   });
 
-  if (options.logPath && containedPath(options.profilePath, options.logPath)) {
+  const stageFacts = await readProfileStageFacts(options.profilePath);
+  const profileInventory = await collectBoundedRelativeInventory(
+    options.profilePath,
+  );
+  await writeDiagnosticArtifact(
+    "gateway-profile-snapshot.json",
+    `${JSON.stringify(
+      {
+        schemaVersion: 1,
+        pidFile,
+        stageFiles: stageFacts,
+        inventory: profileInventory,
+      },
+      null,
+      2,
+    )}\n`,
+  );
+  runtimeContractDiagnostic("gateway-profile-snapshot-written", {
+    inventoryCount: profileInventory.length,
+    stageFileCount: PROFILE_STAGE_FILES.length,
+  });
+
+  const knownStateFiles = [
+    ...(options.userDataPath
+      ? [
+          {
+            name: "runtime-current",
+            path: join(options.userDataPath, "runtime", "current.json"),
+          },
+          {
+            name: "runtime-install-state",
+            path: join(options.userDataPath, "runtime", "install-state.json"),
+          },
+        ]
+      : []),
+    ...(options.versionRoot
+      ? [
+          {
+            name: "runtime-manifest",
+            path: join(options.versionRoot, ".agentera-runtime-manifest.json"),
+          },
+        ]
+      : []),
+  ];
+  for (const stateFile of knownStateFiles) {
     try {
-      const tail = await readRedactedGatewayLogTail(
-        options.logPath,
-        options.privateRoots,
-      );
-      runtimeContractDiagnostic("gateway-stderr-tail", {
-        characters: tail.length,
-        tail,
+      const metadata = await stat(stateFile.path);
+      runtimeContractDiagnostic("gateway-state-file", {
+        name: stateFile.name,
+        exists: true,
+        sizeBytes: metadata.size,
       });
     } catch (error) {
-      runtimeContractDiagnostic("gateway-stderr-unavailable", {
+      runtimeContractDiagnostic("gateway-state-file", {
+        name: stateFile.name,
+        exists: false,
         failure: diagnosticErrorClass(error),
       });
     }
-  } else if (options.logPath) {
-    runtimeContractDiagnostic("gateway-stderr-unavailable", {
-      failure: "outside_profile",
-    });
+  }
+
+  const logCandidates = [
+    ...(options.logPath
+      ? [{ name: "gateway-stderr", path: options.logPath }]
+      : []),
+    {
+      name: "gateway-log",
+      path: join(options.profilePath, "logs", "gateway.log"),
+    },
+    {
+      name: "errors-log",
+      path: join(options.profilePath, "logs", "errors.log"),
+    },
+    {
+      name: "gateway-exit-diag",
+      path: join(options.profilePath, "logs", "gateway-exit-diag.log"),
+    },
+  ];
+  const seenLogPaths = new Set<string>();
+  for (const candidate of logCandidates) {
+    if (seenLogPaths.has(candidate.path)) continue;
+    seenLogPaths.add(candidate.path);
+    if (!containedPath(options.profilePath, candidate.path)) {
+      runtimeContractDiagnostic("gateway-log-unavailable", {
+        name: candidate.name,
+        failure: "outside_profile",
+      });
+      continue;
+    }
+    try {
+      const tail = await readRedactedGatewayLogTail(
+        candidate.path,
+        options.privateRoots,
+      );
+      runtimeContractDiagnostic("gateway-log-tail", {
+        name: candidate.name,
+        characters: tail.length,
+        tail,
+      });
+      await writeDiagnosticArtifact(`${candidate.name}.log`, `${tail}\n`);
+    } catch (error) {
+      runtimeContractDiagnostic("gateway-log-unavailable", {
+        name: candidate.name,
+        failure: diagnosticErrorClass(error),
+      });
+    }
   }
 
   const mainTail = redactGatewayDiagnosticTail(
@@ -428,9 +909,46 @@ async function recordGatewayFailureEvidence(options: {
     characters: mainTail.length,
     tail: mainTail,
   });
+  const fullMainStderr = redactGatewayDiagnosticTail(
+    electronStderrCapture,
+    options.privateRoots,
+  );
+  await writeDiagnosticArtifact("electron-stderr-full.log", fullMainStderr);
+  runtimeContractDiagnostic("electron-stderr-full", {
+    characters: fullMainStderr.length,
+  });
+
+  if (options.pythonExecutable) {
+    try {
+      const samples = await queryWindowsGatewayProcesses(
+        options.pythonExecutable,
+      );
+      runtimeContractDiagnostic("gateway-external-final-sample", {
+        processCount: samples.length,
+        pids: samples.map((sample) => sample.pid).join(","),
+      });
+      for (const sample of samples) {
+        runtimeContractDiagnostic("gateway-external-final-process", {
+          ...sanitizedProcessSample(
+            sample,
+            options.privateRoots,
+            options.pythonExecutable,
+          ),
+        });
+      }
+    } catch (error) {
+      runtimeContractDiagnostic("gateway-external-final-failed", {
+        failure: diagnosticErrorClass(error),
+      });
+    }
+  }
 }
 
 test.afterEach(async () => {
+  if (gatewayLaunchObserver !== null) {
+    await gatewayLaunchObserver.stop();
+    gatewayLaunchObserver = null;
+  }
   if (page) {
     await runCleanupBoundary(
       "gateway-stop",
@@ -466,6 +984,7 @@ test.afterEach(async () => {
   runtimeContractDiagnostic("test-cleanup-complete", { electronClosed });
   diagnosticOutput = null;
   electronStderrTail = "";
+  electronStderrCapture = "";
 });
 
 // @lat: [[agentera-runtime-distribution#Release gate#Packaged live Runtime contract]]
@@ -498,6 +1017,8 @@ test("packaged Electron runs its installed locked Runtime and advertises Agent r
     process.env.AGENTERA_E2E_RUNTIME_CONTRACT_DIAGNOSTIC_OUTPUT?.trim();
   if (requestedDiagnosticOutput) {
     diagnosticOutput = resolve(requestedDiagnosticOutput);
+    electronStderrCapture = "";
+    electronStderrTail = "";
     await mkdir(dirname(diagnosticOutput), { recursive: true });
     await writeFile(diagnosticOutput, "", { flag: "w", mode: 0o600 });
     diagnosticStartedAt = performance.now();
@@ -669,6 +1190,17 @@ test("packaged Electron runs its installed locked Runtime and advertises Agent r
     },
   ]);
   runtimeContractDiagnostic("gateway-invoke-start", { timeoutMs: 180_000 });
+  gatewayLaunchObserver = startGatewayLaunchObserver({
+    profilePath: activeGateway.profilePath,
+    pythonExecutable: installed.pythonExecutable.path,
+    privateRoots: [
+      temporaryRoot,
+      userData,
+      hermesHome,
+      installed.versionRoot,
+      desktopRoot,
+    ],
+  });
   const gatewayHeartbeat = setInterval(
     () => runtimeContractDiagnostic("gateway-invoke-heartbeat"),
     10_000,
@@ -705,10 +1237,17 @@ test("packaged Electron runs its installed locked Runtime and advertises Agent r
       profilePath: activeGateway.profilePath,
       logPath: join(activeGateway.profilePath, "gateway-stderr.log"),
       privateRoots: [temporaryRoot, userData, hermesHome, desktopRoot],
+      pythonExecutable: installed.pythonExecutable.path,
+      versionRoot: installed.versionRoot,
+      userDataPath: userData,
     });
     throw error;
   } finally {
     clearInterval(gatewayHeartbeat);
+    if (gatewayLaunchObserver !== null) {
+      await gatewayLaunchObserver.stop();
+      gatewayLaunchObserver = null;
+    }
   }
   if (!gatewayStart.success || gatewayStart.ready !== true) {
     await recordGatewayFailureEvidence({
@@ -723,6 +1262,9 @@ test("packaged Electron runs its installed locked Runtime and advertises Agent r
         installed.versionRoot,
         desktopRoot,
       ],
+      pythonExecutable: installed.pythonExecutable.path,
+      versionRoot: installed.versionRoot,
+      userDataPath: userData,
     });
   }
   expect(gatewayStart).toMatchObject({
@@ -788,6 +1330,9 @@ test("packaged Electron runs its installed locked Runtime and advertises Agent r
         installed.versionRoot,
         desktopRoot,
       ],
+      pythonExecutable: installed.pythonExecutable.path,
+      versionRoot: installed.versionRoot,
+      userDataPath: userData,
     });
     throw error;
   });

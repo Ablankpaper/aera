@@ -76,6 +76,24 @@ export interface RuntimeProcessIdentity {
   command: string;
 }
 
+/**
+ * One externally-observed Windows Python process sample. The acceptance test
+ * gathers this from its own Node process so an Electron main-thread stall
+ * cannot hide whether the managed Gateway wrapper is consuming CPU, spawning
+ * children, or remaining flat before gateway.pid exists.
+ */
+export interface WindowsGatewayProcessSample {
+  pid: number;
+  parentPid: number;
+  name: string;
+  executablePath: string | null;
+  commandLine: string | null;
+  creationIdentity: string | null;
+  cpuSeconds: number | null;
+  workingSetBytes: number | null;
+  threadCount: number | null;
+}
+
 export interface RuntimeCapabilitiesEvidence {
   features: {
     request_tool_policy: true;
@@ -505,6 +523,89 @@ export function parseWindowsProcessIdentityProbe(result: {
     throw new Error("Live Runtime process identity is invalid");
   }
   return { executable: value.executable, command: value.command };
+}
+
+function nonNegativeInteger(value: unknown): number | null {
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && /^\d+$/u.test(value.trim())
+        ? Number(value)
+        : Number.NaN;
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
+}
+
+function nonNegativeBigInt(value: unknown): bigint | null {
+  if (typeof value === "bigint") return value >= 0n ? value : null;
+  if (typeof value === "number") {
+    return Number.isSafeInteger(value) && value >= 0 ? BigInt(value) : null;
+  }
+  if (typeof value !== "string" || !/^\d+$/u.test(value.trim())) return null;
+  try {
+    return BigInt(value.trim());
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Parse the bounded CIM projection emitted by the packaged Windows observer.
+ * CPU time is projected from the Win32_Process 100ns counters; malformed rows
+ * fail closed instead of being turned into misleading zero-CPU evidence.
+ */
+export function parseWindowsGatewayProcessSamples(result: {
+  status: number | null;
+  stdout: string;
+}): WindowsGatewayProcessSample[] {
+  if (result.status !== 0 || !result.stdout.trim()) {
+    throw new Error("Windows Gateway process sample query failed");
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(result.stdout) as unknown;
+  } catch {
+    throw new Error("Windows Gateway process samples are invalid");
+  }
+  const rows = Array.isArray(parsed) ? parsed : [parsed];
+  return rows.map((entry) => {
+    const row = record(entry, "Windows Gateway process sample");
+    const pid = nonNegativeInteger(row.ProcessId);
+    const parentPid = nonNegativeInteger(row.ParentProcessId);
+    const kernel = nonNegativeBigInt(row.KernelModeTime100ns);
+    const user = nonNegativeBigInt(row.UserModeTime100ns);
+    const workingSetBytes = nonNegativeInteger(row.WorkingSetBytes);
+    const threadCount = nonNegativeInteger(row.ThreadCount);
+    if (
+      pid === null ||
+      pid <= 0 ||
+      parentPid === null ||
+      typeof row.Name !== "string" ||
+      (row.ExecutablePath !== null && typeof row.ExecutablePath !== "string") ||
+      (row.CommandLine !== null && typeof row.CommandLine !== "string")
+    ) {
+      throw new Error("Windows Gateway process samples are invalid");
+    }
+    const creationFileTime =
+      typeof row.CreationFileTimeUtc === "string" &&
+      /^\d+$/u.test(row.CreationFileTimeUtc.trim())
+        ? row.CreationFileTimeUtc.trim()
+        : null;
+    return {
+      pid,
+      parentPid,
+      name: row.Name,
+      executablePath: row.ExecutablePath,
+      commandLine: row.CommandLine,
+      creationIdentity:
+        creationFileTime === null ? null : `windows:${creationFileTime}`,
+      cpuSeconds:
+        kernel === null || user === null
+          ? null
+          : Number(kernel + user) / 10_000_000,
+      workingSetBytes,
+      threadCount,
+    };
+  });
 }
 
 function escapeRegExp(value: string): string {
