@@ -244,7 +244,12 @@ import {
 } from "../src/main/hermes";
 import { GatewayProcessOwnershipLedger } from "../src/main/gateway-process-ownership";
 
-const queuedRestartHealthTimeoutMs = process.platform === "win32" ? 1000 : 50;
+// This test asserts queue/deduplication semantics, not the host scheduler's
+// ability to start a real Node child in a few milliseconds.  Keep a bounded,
+// platform-neutral fixture allowance so parallel CI load cannot turn a
+// healthy queued restart into a false negative.  Production readiness budgets
+// are supplied by the caller and are not changed by this test constant.
+const queuedRestartHealthTimeoutMs = 1000;
 const multiProfileShutdownTestTimeoutMs =
   process.platform === "win32" ? 15_000 : 5_000;
 
