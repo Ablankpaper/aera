@@ -114,6 +114,8 @@ Text-only legacy turns can use the CLI fallback when a session override changes 
 
 The upstream desktop model applies the session switch on the active gateway session with `/model <model> --provider <provider>`, then attaches media and submits on that same session. Hermes Desktop's dashboard transport follows that path; [[src/main/hermes.ts#shouldForceCliForSessionOverride]] keeps the CLI escape hatch only for text-only legacy fallback, where it can pass `-m <model>` and `--provider` without dropping attachments. Same-provider model swaps stay on the gateway/API path, where the new `model` string is sufficient. Remote (SSH) mode has no local CLI transport, so it remains limited to the model string.
 
+The fallback's local-recovery test drains the process-scoped single-flight recovery registry during teardown because partial-output recovery is intentionally fire-and-forget; slow host scheduling must not leak an unfinished recovery into the next isolated test.
+
 ## Attachment turns stay on session transport
 
 Attachment turns must not be forced through the CLI override fallback because the CLI path cannot carry multimodal input.
