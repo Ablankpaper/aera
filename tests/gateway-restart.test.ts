@@ -39,9 +39,9 @@ const {
     healthStatuses: [] as number[],
     aliveGatewayPids: new Set<number>(),
     realGatewayPids: new Set<number>(),
-  pidAliveProbeRef: {
-    onProbe: null as ((pid: number) => void) | null,
-  },
+    pidAliveProbeRef: {
+      onProbe: null as ((pid: number) => void) | null,
+    },
     ensureLocalApiServerKeySpy: vi.fn(() => ({
       generated: false,
       key: "unit-test-internal-token",
@@ -172,8 +172,14 @@ vi.mock("../src/main/process-identity", () => ({
     actual: { identity: string; image: string } | null,
     expected: { identity: string; image: string } | null,
   ) =>
-    actual?.identity === expected?.identity && actual?.image === expected?.image,
+    actual?.identity === expected?.identity &&
+    actual?.image === expected?.image,
   readProcessIdentityEvidence: (pid: number) =>
+    processEvidenceRef.byPid.get(pid) ?? {
+      identity: `test-created-${pid}`,
+      image: "python3",
+    },
+  readProcessIdentityEvidenceAsync: async (pid: number) =>
     processEvidenceRef.byPid.get(pid) ?? {
       identity: `test-created-${pid}`,
       image: "python3",
@@ -981,10 +987,7 @@ describe("restartGatewayViaCli", () => {
     await expect(restartGatewayViaCli("work", 2000, 1)).resolves.toBe(true);
 
     const ownership = JSON.parse(
-      readFileSync(
-        join(TEST_HOME, "gateway-process-ownership.json"),
-        "utf8",
-      ),
+      readFileSync(join(TEST_HOME, "gateway-process-ownership.json"), "utf8"),
     ).entries;
     expect(ownership).toEqual([
       expect.objectContaining({
@@ -1145,11 +1148,7 @@ describe("restartGatewayViaCli", () => {
     healthStatuses.push(503, 200, 503, 503, 503, 200, 200, 200);
 
     const first = restartGatewayViaCli("work", 5, 1);
-    const second = restartGatewayViaCli(
-      "personal",
-      1000,
-      1,
-    );
+    const second = restartGatewayViaCli("personal", 1000, 1);
 
     await expect(Promise.all([first, second])).resolves.toEqual([false, true]);
     expect(hermesCliArgsSpy).toHaveBeenCalledTimes(2);

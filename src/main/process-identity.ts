@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { basename } from "node:path";
 
 /**
@@ -16,6 +16,17 @@ type ExecFileSyncLike = (
   args: readonly string[],
   options: Record<string, unknown>,
 ) => string | Buffer;
+
+type ExecFileAsyncLike = (
+  file: string,
+  args: readonly string[],
+  options: Record<string, unknown>,
+  callback: (error: Error | null, stdout: string | Buffer) => void,
+) => unknown;
+
+const DEFAULT_WINDOWS_IDENTITY_TIMEOUT_MS = 5_000;
+const DEFAULT_POSIX_IDENTITY_TIMEOUT_MS = 1_000;
+const MAX_IDENTITY_OUTPUT_BYTES = 128 * 1024;
 
 function normalizeIdentity(value: unknown): string | null {
   if (typeof value !== "string") return null;
@@ -75,6 +86,116 @@ function defaultExecFileSync(
   options: Record<string, unknown>,
 ): string | Buffer {
   return execFileSync(file, [...args], options as never);
+}
+
+function defaultExecFile(
+  file: string,
+  args: readonly string[],
+  options: Record<string, unknown>,
+  callback: (error: Error | null, stdout: string | Buffer) => void,
+): unknown {
+  return execFile(file, [...args], options as never, callback as never);
+}
+
+function windowsProcessIdentityScript(pid: number): string {
+  // Keep the query targeted and make the singleton/empty cases explicit. A
+  // cold CIM provider may miss the bounded command deadline, but a partial or
+  // malformed row is never converted into ownership evidence.
+  return (
+    "$ErrorActionPreference='Stop'; " +
+    `$rows = @(Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}' -ErrorAction Stop); ` +
+    "if ($rows.Count -eq 0) { Write-Output '{}' } else { " +
+    "$rows[0] | Select-Object Name,ExecutablePath,@{Name='CreationFileTimeUtc';Expression={" +
+    "if ($_.CreationDate) { $_.CreationDate.ToFileTimeUtc().ToString(" +
+    "[Globalization.CultureInfo]::InvariantCulture) } else { '' }" +
+    "}} | ConvertTo-Json -Compress }"
+  );
+}
+
+/**
+ * Read one process's identity without blocking Electron's main event loop.
+ * Windows Runtime startup can activate the CIM provider at the same time as
+ * the Gateway imports its Python modules; the synchronous reader then blocks
+ * every readiness poll behind a PowerShell timeout. This reader keeps the
+ * same strict parser and fail-closed result, but lets the Runtime and the
+ * query progress concurrently inside one bounded command.
+ */
+export function readProcessIdentityEvidenceAsync(
+  pid: number,
+  options: {
+    platform?: NodeJS.Platform;
+    execFile?: ExecFileAsyncLike;
+    timeoutMs?: number;
+  } = {},
+): Promise<ProcessIdentityEvidence | null> {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return Promise.resolve(null);
+  const platform = options.platform ?? process.platform;
+  const run = options.execFile ?? defaultExecFile;
+  const requestedTimeout = options.timeoutMs;
+  const defaultTimeout =
+    platform === "win32"
+      ? DEFAULT_WINDOWS_IDENTITY_TIMEOUT_MS
+      : DEFAULT_POSIX_IDENTITY_TIMEOUT_MS;
+  const timeoutMs =
+    Number.isFinite(requestedTimeout) && requestedTimeout !== undefined
+      ? Math.max(1, Math.floor(requestedTimeout))
+      : defaultTimeout;
+  const command =
+    platform === "win32"
+      ? "powershell.exe"
+      : platform === "darwin"
+        ? "/bin/ps"
+        : "ps";
+  const args =
+    platform === "win32"
+      ? [
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          windowsProcessIdentityScript(pid),
+        ]
+      : ["-p", String(pid), "-o", "lstart=", "-o", "comm="];
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const timerRef: { value: ReturnType<typeof setTimeout> | null } = {
+      value: null,
+    };
+    const finish = (value: ProcessIdentityEvidence | null): void => {
+      if (settled) return;
+      settled = true;
+      if (timerRef.value !== null) clearTimeout(timerRef.value);
+      resolve(value);
+    };
+    timerRef.value = setTimeout(() => finish(null), timeoutMs);
+    timerRef.value.unref?.();
+    try {
+      run(
+        command,
+        args,
+        {
+          encoding: "utf8",
+          timeout: timeoutMs,
+          maxBuffer: MAX_IDENTITY_OUTPUT_BYTES,
+          windowsHide: true,
+        },
+        (error, stdout) => {
+          if (error) {
+            finish(null);
+            return;
+          }
+          const raw = String(stdout);
+          finish(
+            platform === "win32"
+              ? parseWindowsProcessIdentity(raw)
+              : parsePosixProcessIdentity(raw),
+          );
+        },
+      );
+    } catch {
+      finish(null);
+    }
+  });
 }
 
 /**

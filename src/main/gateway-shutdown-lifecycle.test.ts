@@ -194,6 +194,8 @@ vi.mock("./process-identity", () => ({
     actual?.identity === expected?.identity &&
     actual?.image === expected?.image,
   readProcessIdentityEvidence: (pid: number) => processEvidenceRef.value(pid),
+  readProcessIdentityEvidenceAsync: async (pid: number) =>
+    processEvidenceRef.value(pid),
 }));
 vi.mock("./gateway-ports", () => ({
   ensureProfilePortAvailable: vi.fn(async () => 8642),
@@ -615,7 +617,9 @@ describe("ordinary gateway shutdown lifecycle", () => {
   });
 
   it("refuses app-shutdown signals when durable ownership becomes unavailable", async () => {
-    const processKill = vi.spyOn(process, "kill").mockImplementation(() => true);
+    const processKill = vi
+      .spyOn(process, "kill")
+      .mockImplementation(() => true);
     const wrapper = fakeChildProcess(process.pid);
     spawnRef.value.mockReturnValue(wrapper);
     terminateRef.value.mockResolvedValue({
@@ -624,9 +628,7 @@ describe("ordinary gateway shutdown lifecycle", () => {
     });
     configureGatewayProcessOwnership(TEST_OWNERSHIP_ROOT);
     expect(startGatewayDetailed("research").success).toBe(true);
-    mkdirSync(
-      `${TEST_OWNERSHIP_ROOT}/gateway-process-ownership.pending.json`,
-    );
+    mkdirSync(`${TEST_OWNERSHIP_ROOT}/gateway-process-ownership.pending.json`);
 
     try {
       const shutdown = stopAeraOwnedGateways();
@@ -649,10 +651,10 @@ describe("ordinary gateway shutdown lifecycle", () => {
         expect.stringMatching(/^SIG/),
       );
     } finally {
-      rmSync(
-        `${TEST_OWNERSHIP_ROOT}/gateway-process-ownership.pending.json`,
-        { recursive: true, force: true },
-      );
+      rmSync(`${TEST_OWNERSHIP_ROOT}/gateway-process-ownership.pending.json`, {
+        recursive: true,
+        force: true,
+      });
       wrapper.emit("close", 0, null);
       processKill.mockRestore();
     }
@@ -731,15 +733,18 @@ describe("ordinary gateway shutdown lifecycle", () => {
     mkdirSync(`${TEST_HOME}/profiles/term-listener`, { recursive: true });
     const pidPath = `${TEST_HOME}/profiles/term-listener/gateway.pid`;
     writeFileSync(pidPath, JSON.stringify({ pid: 9886 }));
-    configureGatewayProcessOwnership( TEST_OWNERSHIP_ROOT);
+    configureGatewayProcessOwnership(TEST_OWNERSHIP_ROOT);
     let alive = true;
-    pidAliveRef.value.mockImplementation((pid: unknown) => pid === 9886 && alive);
-    const processKill = vi.spyOn(process, "kill").mockImplementation(
-      ((pid: number, signal?: NodeJS.Signals | number) => {
-        if (pid === 9886 && signal === "SIGTERM") alive = false;
-        return true;
-      }) as typeof process.kill,
+    pidAliveRef.value.mockImplementation(
+      (pid: unknown) => pid === 9886 && alive,
     );
+    const processKill = vi.spyOn(process, "kill").mockImplementation(((
+      pid: number,
+      signal?: NodeJS.Signals | number,
+    ) => {
+      if (pid === 9886 && signal === "SIGTERM") alive = false;
+      return true;
+    }) as typeof process.kill);
 
     try {
       const result = recoverAeraOwnedGatewaysFromPreviousRun();
