@@ -359,6 +359,10 @@ interface LaunchObserverOptions {
   profilePath: string;
   pythonExecutable?: string;
   privateRoots: readonly string[];
+  // Process-table snapshots are reserved for the Gateway phase. Running a
+  // Windows CIM query while Runtime extraction/inventory is active can create
+  // machine-wide WMI/process pressure and change the behavior being measured.
+  processSnapshot: "enabled" | "disabled";
 }
 
 function startLaunchObserver(options: LaunchObserverOptions): LaunchObserver {
@@ -366,6 +370,7 @@ function startLaunchObserver(options: LaunchObserverOptions): LaunchObserver {
   let sampleNumber = 0;
   let inFlight: Promise<void> | null = null;
   let unsupportedReported = false;
+  let processSnapshotDisabledReported = false;
   const emit = (
     event: string,
     fields: Readonly<Record<string, boolean | number | string | null>> = {},
@@ -382,6 +387,22 @@ function startLaunchObserver(options: LaunchObserverOptions): LaunchObserver {
         unsupportedReported = true;
         emit("external-observer-unsupported", {
           platform: process.platform,
+        });
+      }
+      emit("profile-stage-sample", {
+        sample: sampleNumber,
+        pidFileStatus: pidFile.status,
+        pid: pidFile.pid,
+        files: compactDiagnosticJson(stageFacts),
+      });
+      return;
+    }
+
+    if (options.processSnapshot === "disabled") {
+      if (!processSnapshotDisabledReported) {
+        processSnapshotDisabledReported = true;
+        emit("external-observer-disabled", {
+          reason: "runtime-install",
         });
       }
       emit("profile-stage-sample", {
@@ -471,14 +492,22 @@ function startGatewayLaunchObserver(options: {
   pythonExecutable: string;
   privateRoots: readonly string[];
 }): LaunchObserver {
-  return startLaunchObserver({ eventPrefix: "gateway", ...options });
+  return startLaunchObserver({
+    eventPrefix: "gateway",
+    ...options,
+    processSnapshot: "enabled",
+  });
 }
 
 function startRuntimeInstallObserver(options: {
   profilePath: string;
   privateRoots: readonly string[];
 }): LaunchObserver {
-  return startLaunchObserver({ eventPrefix: "runtime-install", ...options });
+  return startLaunchObserver({
+    eventPrefix: "runtime-install",
+    ...options,
+    processSnapshot: "disabled",
+  });
 }
 
 async function collectBoundedRelativeInventory(
