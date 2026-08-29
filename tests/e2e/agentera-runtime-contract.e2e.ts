@@ -63,7 +63,8 @@ let diagnosticOutput: string | null = null;
 let diagnosticStartedAt = 0;
 let electronStderrTail = "";
 let electronStderrCapture = "";
-let gatewayLaunchObserver: GatewayLaunchObserver | null = null;
+let runtimeInstallObserver: LaunchObserver | null = null;
+let gatewayLaunchObserver: LaunchObserver | null = null;
 const MAIN_PROCESS_STDERR_READ_CHARS = 16_384;
 const MAX_CAPTURED_ELECTRON_STDERR_CHARS = 512 * 1024;
 const EXTERNAL_GATEWAY_OBSERVER_INTERVAL_MS = 5_000;
@@ -166,8 +167,8 @@ function runExternalCommand(
 const WINDOWS_GATEWAY_PROCESS_QUERY = `
 $ErrorActionPreference = 'Stop'
 $rows = @(Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object {
-  $_.Name -match '^(python|pythonw)\\.exe$' -and
-  $_.CommandLine -match 'hermes_cli\\.main|gateway'
+  $_.Name -match '^(python|pythonw|node|nodejs|electron|aera)\\.exe$' -and
+  $_.CommandLine -match '(?i)hermes_cli\\.main|gateway|runtime-(archive|inventory|health)|agentera-runtime'
 })
 if ($rows.Count -eq 0) {
   '[]'
@@ -197,24 +198,32 @@ function normalizedDiagnosticPath(value: string | null | undefined): string {
     .toLowerCase();
 }
 
-function processUsesGatewayCommand(
+function processUsesRuntimeCommand(
   sample: WindowsGatewayProcessSample,
 ): boolean {
   const command = (sample.commandLine ?? "").toLowerCase();
-  return command.includes("hermes_cli.main") && command.includes("gateway");
+  return [
+    "hermes_cli.main",
+    "gateway",
+    "runtime-archive",
+    "runtime-inventory",
+    "runtime-health",
+    "agentera-runtime",
+  ].some((marker) => command.includes(marker));
 }
 
 function processMatchesInstalledPython(
   sample: WindowsGatewayProcessSample,
-  pythonExecutable: string,
+  pythonExecutable: string | undefined,
 ): boolean {
+  if (!pythonExecutable) return false;
   const expected = normalizedDiagnosticPath(pythonExecutable);
   const observed = normalizedDiagnosticPath(sample.executablePath);
   return Boolean(expected && observed === expected);
 }
 
-async function queryWindowsGatewayProcesses(
-  pythonExecutable: string,
+async function queryWindowsRuntimeProcesses(
+  pythonExecutable?: string,
 ): Promise<WindowsGatewayProcessSample[]> {
   const result = await runExternalCommand(
     "powershell.exe",
@@ -237,7 +246,7 @@ async function queryWindowsGatewayProcesses(
   return parseWindowsGatewayProcessSamples(result).filter(
     (sample) =>
       processMatchesInstalledPython(sample, pythonExecutable) ||
-      processUsesGatewayCommand(sample),
+      processUsesRuntimeCommand(sample),
   );
 }
 
@@ -290,7 +299,7 @@ function compactDiagnosticJson(value: unknown, maxChars = 6_000): string {
 function sanitizedProcessSample(
   sample: WindowsGatewayProcessSample,
   privateRoots: readonly string[],
-  pythonExecutable: string,
+  pythonExecutable?: string,
 ): Record<string, boolean | number | string | null> {
   const command = sample.commandLine
     ? redactGatewayDiagnosticTail(sample.commandLine, privateRoots)
@@ -299,10 +308,9 @@ function sanitizedProcessSample(
     pid: sample.pid,
     parentPid: sample.parentPid,
     image: sample.name,
-    executableMatchesInstalled: processMatchesInstalledPython(
-      sample,
-      pythonExecutable,
-    ),
+    executableMatchesInstalled: pythonExecutable
+      ? processMatchesInstalledPython(sample, pythonExecutable)
+      : null,
     creationIdentity: sample.creationIdentity,
     cpuSeconds: sample.cpuSeconds,
     workingSetBytes: sample.workingSetBytes,
@@ -317,19 +325,28 @@ function sanitizedProcessSample(
   };
 }
 
-interface GatewayLaunchObserver {
+interface LaunchObserver {
   stop(): Promise<void>;
 }
 
-function startGatewayLaunchObserver(options: {
+interface LaunchObserverOptions {
+  eventPrefix: string;
   profilePath: string;
-  pythonExecutable: string;
+  pythonExecutable?: string;
   privateRoots: readonly string[];
-}): GatewayLaunchObserver {
+}
+
+function startLaunchObserver(options: LaunchObserverOptions): LaunchObserver {
   let stopped = false;
   let sampleNumber = 0;
   let inFlight: Promise<void> | null = null;
   let unsupportedReported = false;
+  const emit = (
+    event: string,
+    fields: Readonly<Record<string, boolean | number | string | null>> = {},
+  ): void => {
+    runtimeContractDiagnostic(`${options.eventPrefix}-${event}`, fields);
+  };
 
   const collect = async (): Promise<void> => {
     sampleNumber += 1;
@@ -338,11 +355,11 @@ function startGatewayLaunchObserver(options: {
     if (process.platform !== "win32") {
       if (!unsupportedReported) {
         unsupportedReported = true;
-        runtimeContractDiagnostic("gateway-external-observer-unsupported", {
+        emit("external-observer-unsupported", {
           platform: process.platform,
         });
       }
-      runtimeContractDiagnostic("gateway-profile-stage-sample", {
+      emit("profile-stage-sample", {
         sample: sampleNumber,
         pidFileStatus: pidFile.status,
         pid: pidFile.pid,
@@ -353,15 +370,15 @@ function startGatewayLaunchObserver(options: {
 
     let samples: WindowsGatewayProcessSample[];
     try {
-      samples = await queryWindowsGatewayProcesses(options.pythonExecutable);
+      samples = await queryWindowsRuntimeProcesses(options.pythonExecutable);
     } catch (error) {
-      runtimeContractDiagnostic("gateway-external-observer-failed", {
+      emit("external-observer-failed", {
         sample: sampleNumber,
         failure: diagnosticErrorClass(error),
       });
       return;
     }
-    runtimeContractDiagnostic("gateway-external-observer-sample", {
+    emit("external-observer-sample", {
       sample: sampleNumber,
       pidFileStatus: pidFile.status,
       pid: pidFile.pid,
@@ -374,12 +391,12 @@ function startGatewayLaunchObserver(options: {
         options.privateRoots,
         options.pythonExecutable,
       );
-      runtimeContractDiagnostic("gateway-external-process-sample", {
+      emit("external-process-sample", {
         sample: sampleNumber,
         ...safe,
       });
     }
-    runtimeContractDiagnostic("gateway-profile-stage-sample", {
+    emit("profile-stage-sample", {
       sample: sampleNumber,
       pidFileStatus: pidFile.status,
       pid: pidFile.pid,
@@ -391,7 +408,7 @@ function startGatewayLaunchObserver(options: {
     if (stopped || inFlight !== null) return;
     inFlight = collect()
       .catch((error) => {
-        runtimeContractDiagnostic("gateway-external-observer-failed", {
+        emit("external-observer-failed", {
           sample: sampleNumber,
           failure: diagnosticErrorClass(error),
         });
@@ -415,13 +432,28 @@ function startGatewayLaunchObserver(options: {
       try {
         await collect();
       } catch (error) {
-        runtimeContractDiagnostic("gateway-external-observer-failed", {
+        emit("external-observer-failed", {
           sample: sampleNumber,
           failure: diagnosticErrorClass(error),
         });
       }
     },
   };
+}
+
+function startGatewayLaunchObserver(options: {
+  profilePath: string;
+  pythonExecutable: string;
+  privateRoots: readonly string[];
+}): LaunchObserver {
+  return startLaunchObserver({ eventPrefix: "gateway", ...options });
+}
+
+function startRuntimeInstallObserver(options: {
+  profilePath: string;
+  privateRoots: readonly string[];
+}): LaunchObserver {
+  return startLaunchObserver({ eventPrefix: "runtime-install", ...options });
 }
 
 async function collectBoundedRelativeInventory(
@@ -769,6 +801,118 @@ async function waitForGatewayEndpoint(
   return evidence;
 }
 
+async function recordRuntimeInstallFailureEvidence(options: {
+  profilePath: string;
+  runtimeRoot: string;
+  privateRoots: readonly string[];
+}): Promise<void> {
+  const pidFile = await inspectGatewayPidFile(options.profilePath);
+  const profileStageFacts = await readProfileStageFacts(options.profilePath);
+  const roots = [
+    { name: "profile", path: options.profilePath },
+    { name: "runtime", path: options.runtimeRoot },
+  ];
+  const inventories: Record<
+    string,
+    readonly Record<string, boolean | number | string | null>[]
+  > = {};
+  for (const root of roots) {
+    try {
+      inventories[root.name] = await collectBoundedRelativeInventory(
+        root.path,
+        512,
+      );
+    } catch (error) {
+      inventories[root.name] = [
+        {
+          path: ".",
+          directory: true,
+          error: diagnosticErrorClass(error),
+        },
+      ];
+    }
+  }
+  runtimeContractDiagnostic("runtime-install-failure-snapshot", {
+    pidFileStatus: pidFile.status,
+    pid: pidFile.pid,
+    profileInventoryCount: inventories.profile?.length ?? 0,
+    runtimeInventoryCount: inventories.runtime?.length ?? 0,
+  });
+  await writeDiagnosticArtifact(
+    "runtime-install-snapshot.json",
+    `${JSON.stringify(
+      {
+        schemaVersion: 1,
+        pidFile,
+        profileStageFiles: profileStageFacts,
+        inventories,
+      },
+      null,
+      2,
+    )}\n`,
+  );
+
+  const logCandidates = [
+    "logs/gateway.log",
+    "logs/errors.log",
+    "logs/gateway-exit-diag.log",
+  ];
+  for (const relativePath of logCandidates) {
+    const logPath = join(options.profilePath, relativePath);
+    try {
+      const tail = await readRedactedGatewayLogTail(
+        logPath,
+        options.privateRoots,
+      );
+      const name = relativePath.replaceAll("/", "-");
+      await writeDiagnosticArtifact(`${name}.log`, `${tail}\n`);
+      runtimeContractDiagnostic("runtime-install-log-tail", {
+        name,
+        characters: tail.length,
+        tail,
+      });
+    } catch (error) {
+      runtimeContractDiagnostic("runtime-install-log-unavailable", {
+        name: relativePath,
+        failure: diagnosticErrorClass(error),
+      });
+    }
+  }
+
+  const fullMainStderr = redactGatewayDiagnosticTail(
+    electronStderrCapture,
+    options.privateRoots,
+  );
+  await writeDiagnosticArtifact("electron-stderr-full.log", fullMainStderr);
+  runtimeContractDiagnostic("runtime-install-electron-stderr", {
+    characters: fullMainStderr.length,
+  });
+
+  if (process.platform === "win32") {
+    try {
+      const samples = await queryWindowsRuntimeProcesses();
+      await writeDiagnosticArtifact(
+        "runtime-install-processes.json",
+        `${JSON.stringify(
+          samples.map((sample) =>
+            sanitizedProcessSample(sample, options.privateRoots),
+          ),
+          null,
+          2,
+        )}\n`,
+      );
+      runtimeContractDiagnostic("runtime-install-final-processes", {
+        processCount: samples.length,
+        pids: samples.map((sample) => sample.pid).join(","),
+      });
+    } catch (error) {
+      runtimeContractDiagnostic("runtime-install-final-processes-failed", {
+        failure: diagnosticErrorClass(error),
+      });
+    }
+  }
+}
+
 async function recordGatewayFailureEvidence(options: {
   profilePath: string;
   logPath: string | undefined;
@@ -920,7 +1064,7 @@ async function recordGatewayFailureEvidence(options: {
 
   if (options.pythonExecutable) {
     try {
-      const samples = await queryWindowsGatewayProcesses(
+      const samples = await queryWindowsRuntimeProcesses(
         options.pythonExecutable,
       );
       runtimeContractDiagnostic("gateway-external-final-sample", {
@@ -945,6 +1089,10 @@ async function recordGatewayFailureEvidence(options: {
 }
 
 test.afterEach(async () => {
+  if (runtimeInstallObserver !== null) {
+    await runtimeInstallObserver.stop();
+    runtimeInstallObserver = null;
+  }
   if (gatewayLaunchObserver !== null) {
     await gatewayLaunchObserver.stop();
     gatewayLaunchObserver = null;
@@ -1090,12 +1238,28 @@ test("packaged Electron runs its installed locked Runtime and advertises Agent r
   const desktopVersion = await app.evaluate(({ app: electronApp }) =>
     electronApp.getVersion(),
   );
+  if (diagnosticOutput !== null) {
+    runtimeInstallObserver = startRuntimeInstallObserver({
+      profilePath: hermesHome,
+      privateRoots: [
+        temporaryRoot,
+        userData,
+        hermesHome,
+        seedDirectory,
+        desktopRoot,
+      ],
+    });
+  }
   runtimeContractDiagnostic("install-invoke-start");
   const installHeartbeat = setInterval(
     () => runtimeContractDiagnostic("install-heartbeat"),
     15_000,
   );
-  let install: Awaited<ReturnType<typeof window.hermesAPI.startInstall>>;
+  let install:
+    | Awaited<ReturnType<typeof window.hermesAPI.startInstall>>
+    | undefined;
+  let installFailed = false;
+  let installFailure: unknown;
   try {
     install = await withDiagnosticTimeout(
       () => page!.evaluate(() => window.hermesAPI.startInstall()),
@@ -1106,12 +1270,46 @@ test("packaged Electron runs its installed locked Runtime and advertises Agent r
       errorCode: install.errorCode ?? null,
     });
   } catch (error) {
+    installFailed = true;
+    installFailure = error;
     runtimeContractDiagnostic("install-invoke-failed", {
       failure: diagnosticErrorClass(error),
     });
-    throw error;
   } finally {
     clearInterval(installHeartbeat);
+    if (runtimeInstallObserver !== null) {
+      try {
+        await runtimeInstallObserver.stop();
+      } catch (error) {
+        runtimeContractDiagnostic("runtime-install-observer-stop-failed", {
+          failure: diagnosticErrorClass(error),
+        });
+      }
+      runtimeInstallObserver = null;
+    }
+  }
+  if (installFailed) {
+    try {
+      await recordRuntimeInstallFailureEvidence({
+        profilePath: hermesHome,
+        runtimeRoot: join(userData, "runtime"),
+        privateRoots: [
+          temporaryRoot,
+          userData,
+          hermesHome,
+          seedDirectory,
+          desktopRoot,
+        ],
+      });
+    } catch (error) {
+      runtimeContractDiagnostic("runtime-install-failure-evidence-failed", {
+        failure: diagnosticErrorClass(error),
+      });
+    }
+    throw installFailure;
+  }
+  if (install === undefined) {
+    throw new Error("Packaged Runtime installation returned no result");
   }
   expect(install).toEqual({ success: true });
   // `start-install` returns only after the main process has synchronized its
