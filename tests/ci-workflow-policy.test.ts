@@ -177,6 +177,18 @@ describe("CI workflow policy", () => {
             "windows-runtime-health-diagnostic-${{ github.run_id }}",
       ),
     ).toBe(true);
+
+    const packagedAcceptanceWorkflow = readFileSync(
+      resolve(".github/workflows/beta38-windows-packaged-acceptance.yml"),
+      "utf8",
+    );
+    expect(packagedAcceptanceWorkflow).toContain(
+      "$env:AGENTERA_RUNTIME_INVENTORY_DIAGNOSTIC_OUTPUT",
+    );
+    expect(packagedAcceptanceWorkflow).not.toContain(
+      "$env:AERA_RUNTIME_INVENTORY_DIAGNOSTIC_OUTPUT",
+    );
+    expect(packagedAcceptanceWorkflow).toContain("test-results");
   });
 
   it("runs the managed Gateway diagnostic contract in ordinary platform CI", () => {
