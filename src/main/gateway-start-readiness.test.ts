@@ -19,6 +19,7 @@ const {
   execFileRef,
   pidAliveRef,
   processEvidenceRef,
+  processEvidenceAsyncRef,
   apiKeyRef,
   httpState,
   terminateRef,
@@ -46,6 +47,12 @@ const {
   },
   processEvidenceRef: {
     value: vi.fn((pid: number) => ({
+      identity: `test-created-${pid}`,
+      image: "python3",
+    })),
+  },
+  processEvidenceAsyncRef: {
+    value: vi.fn(async (pid: number) => ({
       identity: `test-created-${pid}`,
       image: "python3",
     })),
@@ -204,6 +211,8 @@ vi.mock("./process-identity", () => ({
     actual?.identity === expected?.identity &&
     actual?.image === expected?.image,
   readProcessIdentityEvidence: (pid: number) => processEvidenceRef.value(pid),
+  readProcessIdentityEvidenceAsync: (pid: number) =>
+    processEvidenceAsyncRef.value(pid),
 }));
 vi.mock("./gateway-ports", () => ({
   ensureProfilePortAvailable: vi.fn(async () => 8642),
@@ -292,6 +301,10 @@ describe("startGatewayWithReadiness", () => {
       identity: `test-created-${pid}`,
       image: "python3",
     }));
+    processEvidenceAsyncRef.value.mockReset();
+    processEvidenceAsyncRef.value.mockImplementation(async (pid: number) =>
+      processEvidenceRef.value(pid),
+    );
     apiKeyRef.value = "generated-internal-token";
     httpState.statusCode.value = 200;
     httpState.authorizeWith.value = null;
@@ -382,6 +395,56 @@ describe("startGatewayWithReadiness", () => {
           request.authorization === "Bearer generated-internal-token",
       ),
     ).toBe(true);
+  });
+
+  it("uses the asynchronous process-evidence reader when the synchronous probe is unavailable", async () => {
+    spawnNextWithPidFile(4321, 9876);
+    expectListenerAlive();
+    // Reproduce the packaged cold-start boundary: the synchronous PowerShell
+    // query misses its bounded window, while the non-blocking query completes
+    // once the process table provider is ready.
+    processEvidenceRef.value.mockReturnValue(null as never);
+    processEvidenceAsyncRef.value.mockResolvedValue({
+      identity: "test-created-9876",
+      image: "python3",
+    });
+    configureGatewayProcessOwnership(TEST_OWNERSHIP_ROOT);
+
+    const promise = startGatewayWithReadiness(
+      undefined,
+      { key: "generated-internal-token", port: 8642 },
+      { readyTimeoutMs: 100, pollMs: 20 },
+    );
+    await vi.advanceTimersByTimeAsync(500);
+    const result = await promise;
+
+    expect(result.success).toBe(true);
+    expect(result.running).toBe(true);
+    expect(result.ready).toBe(true);
+    expect(result.diagnostics?.pid).toBe(9876);
+    expect(processEvidenceAsyncRef.value).toHaveBeenCalledWith(9876);
+  });
+
+  it("does not synchronously query the wrapper during a readiness-gated launch", async () => {
+    spawnNextWithPidFile(4321, 9876);
+    expectListenerAlive();
+    processEvidenceRef.value.mockImplementation(() => {
+      throw new Error("synchronous process evidence must not run");
+    });
+    processEvidenceAsyncRef.value.mockImplementation(async (pid: number) => ({
+      identity: `test-created-${pid}`,
+      image: "python3",
+    }));
+    configureGatewayProcessOwnership(TEST_OWNERSHIP_ROOT);
+
+    const result = await startGatewayWithReadiness(undefined, {
+      key: "generated-internal-token",
+      port: 8642,
+    });
+
+    expect(result.ready).toBe(true);
+    expect(processEvidenceRef.value).not.toHaveBeenCalled();
+    expect(processEvidenceAsyncRef.value).toHaveBeenCalledWith(9876);
   });
 
   it("persists listener identity and executable image with readiness evidence", async () => {

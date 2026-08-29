@@ -435,6 +435,10 @@ vi.mock("../src/main/process-identity", () => ({
     identity: `test-created-${pid}`,
     image: process.execPath,
   }),
+  readProcessIdentityEvidenceAsync: async (pid: number) => ({
+    identity: `test-created-${pid}`,
+    image: process.execPath,
+  }),
 }));
 
 vi.mock("../src/main/models", () => ({

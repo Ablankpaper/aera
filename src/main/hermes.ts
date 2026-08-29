@@ -49,6 +49,7 @@ import {
   processImageMatchesExecutable,
   processEvidenceMatches,
   readProcessIdentityEvidence,
+  readProcessIdentityEvidenceAsync,
   type ProcessIdentityEvidence,
 } from "./process-identity";
 import { getProfilePort, isLoopbackPortReleased } from "./gateway-ports";
@@ -4248,7 +4249,10 @@ export function startGatewayDetailed(
      * entry; a caller that must keep process evidence through a longer
      * operation (readiness, cleanup) captures the reference here.
      */
-    onSpawn?: (proc: ChildProcess) => void;
+    onSpawn?: (
+      proc: ChildProcess,
+      ownership: GatewayLaunchOwnershipRecord,
+    ) => void;
     /**
      * Readiness-gated callers perform the listener adoption themselves after
      * the authenticated probe.  Suppress the background adoption probe for
@@ -4256,6 +4260,12 @@ export function startGatewayDetailed(
      * budget (or adopt a PID before the gate has established API health).
      */
     schedulePidAdoption?: boolean;
+    /**
+     * Readiness-gated callers must not synchronously activate the Windows CIM
+     * provider on Electron's main thread. They capture the wrapper evidence
+     * through the bounded async reader and persist it before adoption/cleanup.
+     */
+    deferSpawnEvidence?: boolean;
   },
 ): GatewayStartResult {
   // Defensive: the local gateway is never the right thing to spawn in
@@ -4369,7 +4379,9 @@ export function startGatewayDetailed(
     if (typeof proc.pid !== "number") {
       throw new Error("The gateway process identity is unavailable.");
     }
-    spawnedEvidence = readGatewayProcessEvidence(proc.pid);
+    if (options?.deferSpawnEvidence !== true) {
+      spawnedEvidence = readGatewayProcessEvidence(proc.pid);
+    }
     ownership = gatewayProcessOwnership.markSpawned({
       profileId: key,
       launchId: ownership.launchId,
@@ -4377,7 +4389,7 @@ export function startGatewayDetailed(
       spawnedIdentity: spawnedEvidence?.identity,
       spawnedImage: spawnedEvidence?.image,
     });
-    options?.onSpawn?.(proc);
+    options?.onSpawn?.(proc, ownership);
   } catch (err) {
     if (ownership !== null && proc !== null && typeof proc.pid === "number") {
       retainFailedSpawnOwnershipUntilExit(
@@ -4535,6 +4547,69 @@ function readGatewayProcessEvidence(
     if (!identity || !image) return null;
     return { identity, image };
   } catch {
+    return null;
+  }
+}
+
+/**
+ * Read Gateway process evidence without synchronously blocking Electron's
+ * main process. The synchronous reader remains available for already-synchronous
+ * lifecycle/status APIs; readiness uses this bounded async path so a cold
+ * Windows CIM provider cannot starve the Runtime's own startup.
+ */
+async function readGatewayProcessEvidenceAsync(
+  pid: number,
+): Promise<ProcessIdentityEvidence | null> {
+  try {
+    const evidence = await readProcessIdentityEvidenceAsync(pid);
+    if (!evidence) return null;
+    const identity = evidence.identity.trim();
+    const image = normalizeProcessImage(evidence.image);
+    if (!identity || !image) return null;
+    return { identity, image };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Persist a wrapper's asynchronously captured identity only while the same
+ * launch transaction still owns the Profile. A late PowerShell callback must
+ * never resurrect a cleared launch or overwrite evidence from a newer
+ * restart. The ledger method remains the single atomic writer for the record.
+ */
+function persistSpawnedGatewayEvidence(
+  profileKeyValue: string,
+  launchId: string,
+  pid: number,
+  evidence: ProcessIdentityEvidence | null,
+): GatewayLaunchOwnershipRecord | null {
+  if (evidence === null || gatewayProcessOwnership === null) return null;
+  try {
+    const current = gatewayProcessOwnership.get(profileKeyValue);
+    if (
+      current === null ||
+      current.launchId !== launchId ||
+      current.spawnedPid !== pid
+    ) {
+      return current;
+    }
+    if (current.spawnedIdentity !== null || current.spawnedImage !== null) {
+      return current.spawnedIdentity === evidence.identity &&
+        current.spawnedImage === evidence.image
+        ? current
+        : null;
+    }
+    return gatewayProcessOwnership.markSpawned({
+      profileId: profileKeyValue,
+      launchId,
+      spawnedPid: pid,
+      spawnedIdentity: evidence.identity,
+      spawnedImage: evidence.image,
+    });
+  } catch {
+    // A concurrent close/restart or persistence failure leaves the durable
+    // launch guard intact. Callers must continue to fail closed.
     return null;
   }
 }
@@ -4725,14 +4800,16 @@ async function waitForGatewayServing(
       candidate !== null && candidate === (preLaunchPid ?? null);
     const candidateIsTrackedLaunch =
       candidate !== null && candidate === (launchPid ?? null);
-    const candidateAlive =
-      candidate !== null && !candidateIsPreLaunch
-        ? pidIsAliveAs(candidate, GATEWAY_IMAGE_PREFIXES)
-        : false;
+    // The async identity query is itself the liveness proof: a complete row
+    // can only be returned for a process that exists at query time. Avoid the
+    // synchronous tasklist/CIM pair here; on a cold packaged Windows launch
+    // either call can block the Electron main loop long enough to starve the
+    // Runtime and make every subsequent readiness poll miss its evidence.
     const observedListenerEvidence =
-      candidateAlive && candidate !== null
-        ? readGatewayProcessEvidence(candidate)
+      candidate !== null && !candidateIsPreLaunch
+        ? await readGatewayProcessEvidenceAsync(candidate)
         : null;
+    const candidateAlive = observedListenerEvidence !== null;
     const listenerEvidence = isGatewayProcessEvidence(observedListenerEvidence)
       ? observedListenerEvidence
       : null;
@@ -5094,16 +5171,30 @@ export async function startGatewayWithReadiness(
   const preLaunchPid = readPidFile(profile);
   // An object cell: TS control-flow cannot track closure assignment into a
   // plain `let`, which would narrow the later reads to `null`/`never`.
-  const launchRef: { proc: ChildProcess | null } = { proc: null };
+  const launchRef: {
+    proc: ChildProcess | null;
+    launchId: string | null;
+  } = { proc: null, launchId: null };
   const startResult = startGatewayDetailed(profile, prepared, {
-    onSpawn: (proc) => {
+    onSpawn: (proc, ownership) => {
       launchRef.proc = proc;
+      launchRef.launchId = ownership.launchId;
     },
     schedulePidAdoption: false,
+    deferSpawnEvidence: true,
   });
   if (!startResult.success) {
     return { ...startResult, ready: false };
   }
+
+  // Capture the short-lived wrapper without activating PowerShell/CIM on the
+  // Electron main thread. The promise is allowed to run alongside the normal
+  // pid/API readiness gate; it is joined once before adoption or cleanup so
+  // the durable record contains every identity we were able to prove.
+  const wrapperEvidencePromise =
+    launchRef.proc?.pid !== undefined
+      ? readGatewayProcessEvidenceAsync(launchRef.proc.pid)
+      : Promise.resolve(null);
 
   const readyTimeoutMs = options.readyTimeoutMs ?? gatewayReadyTimeoutMs();
   const pollMs = options.pollMs ?? 500;
@@ -5131,6 +5222,16 @@ export async function startGatewayWithReadiness(
     listenerPid: serving.listenerPid,
     elapsedMs: Date.now() - readinessStartedAt,
   });
+
+  const wrapperEvidence = await wrapperEvidencePromise;
+  if (launchRef.proc?.pid !== undefined && launchRef.launchId !== null) {
+    persistSpawnedGatewayEvidence(
+      profileKey(profile),
+      launchRef.launchId,
+      launchRef.proc.pid,
+      wrapperEvidence,
+    );
+  }
 
   if (serving.ready) {
     setApiCacheFor(profile, true);
