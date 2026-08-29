@@ -16,6 +16,7 @@ const {
   TEST_OWNERSHIP_ROOT,
   invocation,
   spawnRef,
+  execFileRef,
   pidAliveRef,
   processEvidenceRef,
   apiKeyRef,
@@ -39,6 +40,7 @@ const {
     environment: (base: Record<string, string> = {}) => ({ ...base }),
   },
   spawnRef: { value: vi.fn() },
+  execFileRef: { value: vi.fn() },
   pidAliveRef: {
     value: vi.fn((..._args: unknown[]) => false),
   },
@@ -86,6 +88,7 @@ vi.mock("child_process", async (importOriginal) => {
     ...actual,
     spawn: (...args: Parameters<typeof actual.spawn>) =>
       spawnRef.value(...args),
+    execFile: (...args: unknown[]) => execFileRef.value(...args),
   };
 });
 vi.mock("http", () => {
@@ -281,6 +284,7 @@ describe("startGatewayWithReadiness", () => {
     rmSync(TEST_HOME, { recursive: true, force: true });
     mkdirSync(TEST_OWNERSHIP_ROOT, { recursive: true });
     spawnRef.value.mockReset();
+    execFileRef.value.mockReset();
     pidAliveRef.value.mockReset();
     pidAliveRef.value.mockReturnValue(false);
     processEvidenceRef.value.mockReset();
@@ -649,9 +653,71 @@ describe("startGatewayWithReadiness", () => {
     if (process.platform === "win32") {
       // Windows samples the wrapper's real CPU seconds via PowerShell.
       expect(events).toMatch(/"wrapperCpuSeconds":(?:\d+(?:\.\d+)?|null)/u);
+      expect(events).toMatch(
+        /"wrapperCpuSampleState":"(?:pending|value|missing|error)"/u,
+      );
     } else {
       expect(events).toContain('"wrapperCpuSeconds":null');
+      expect(events).toContain('"wrapperCpuSampleState":"unsupported"');
     }
+  });
+
+  it("does not let a slow Windows CPU sample extend the readiness deadline", async () => {
+    const platform = vi
+      .spyOn(process, "platform", "get")
+      .mockReturnValue("win32");
+    process.env.AGENTERA_E2E_DIAGNOSTICS = "1";
+    httpState.statusCode.value = 503;
+    spawnNext(process.pid);
+    configureGatewayProcessOwnership(TEST_OWNERSHIP_ROOT);
+
+    let releaseCpuSample:
+      | ((error: Error | null, stdout: string) => void)
+      | undefined;
+    execFileRef.value.mockImplementation(
+      (
+        _command: string,
+        _args: string[],
+        _options: { timeout: number },
+        callback: (error: Error | null, stdout: string) => void,
+      ) => {
+        releaseCpuSample = callback;
+        return {};
+      },
+    );
+
+    let settled = false;
+    const promise = startGatewayWithReadiness(
+      undefined,
+      { key: "generated-internal-token", port: 8642 },
+      { readyTimeoutMs: 100, pollMs: 20 },
+    );
+    void promise.then(
+      () => {
+        settled = true;
+      },
+      () => {
+        settled = true;
+      },
+    );
+
+    await vi.advanceTimersByTimeAsync(250);
+    const settledBeforeCpuCallback = settled;
+
+    // Release the intentionally delayed callback so a broken implementation
+    // can finish before this test asserts the deadline behavior.
+    releaseCpuSample?.(null, "12.5\n");
+    await vi.advanceTimersByTimeAsync(250);
+    const result = await promise;
+    platform.mockRestore();
+
+    expect(settledBeforeCpuCallback).toBe(true);
+    expect(result.ready).toBe(false);
+    expect(result.success).toBe(false);
+    expect(result.diagnostics?.termination).toEqual({
+      forced: false,
+      remainingPids: [],
+    });
   });
 
   it("still cleans up the listener when the wrapper exits before the deadline", async () => {

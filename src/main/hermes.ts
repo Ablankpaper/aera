@@ -4584,10 +4584,38 @@ function gatewayReadyTimeoutMs(): number {
     : DEFAULT_GATEWAY_READY_TIMEOUT_MS;
 }
 
-function sampleGatewayWrapperCpuSeconds(pid: number): Promise<number | null> {
-  if (process.platform !== "win32") return Promise.resolve(null);
+type GatewayWrapperCpuSampleState =
+  | "not-requested"
+  | "unsupported"
+  | "pending"
+  | "value"
+  | "missing"
+  | "error";
+
+type GatewayWrapperCpuSample = {
+  seconds: number | null;
+  state: Exclude<GatewayWrapperCpuSampleState, "not-requested" | "pending">;
+  errorCode: string | null;
+};
+
+function sampleGatewayWrapperCpuSeconds(
+  pid: number,
+): Promise<GatewayWrapperCpuSample> {
+  if (process.platform !== "win32") {
+    return Promise.resolve({
+      seconds: null,
+      state: "unsupported",
+      errorCode: null,
+    });
+  }
   const safePid = Number.isSafeInteger(pid) && pid > 0 ? Math.floor(pid) : null;
-  if (safePid === null) return Promise.resolve(null);
+  if (safePid === null) {
+    return Promise.resolve({
+      seconds: null,
+      state: "error",
+      errorCode: "invalid-pid",
+    });
+  }
   return new Promise((resolve) => {
     execFile(
       "powershell.exe",
@@ -4600,11 +4628,31 @@ function sampleGatewayWrapperCpuSeconds(pid: number): Promise<number | null> {
       { timeout: 3_000, windowsHide: true },
       (error, stdout) => {
         if (error) {
-          resolve(null);
+          const code = (error as NodeJS.ErrnoException).code;
+          const errorCode =
+            error.killed || error.signal
+              ? "timeout"
+              : typeof code === "string" && /^[A-Za-z0-9_-]{1,32}$/u.test(code)
+                ? code
+                : "exec-error";
+          resolve({ seconds: null, state: "error", errorCode });
           return;
         }
-        const value = Number(String(stdout).trim());
-        resolve(Number.isFinite(value) ? value : null);
+        const output = String(stdout).trim();
+        if (!output) {
+          resolve({ seconds: null, state: "missing", errorCode: null });
+          return;
+        }
+        const value = Number(output);
+        if (!Number.isFinite(value)) {
+          resolve({
+            seconds: null,
+            state: "error",
+            errorCode: "invalid-output",
+          });
+          return;
+        }
+        resolve({ seconds: value, state: "value", errorCode: null });
       },
     );
   });
@@ -4665,6 +4713,10 @@ async function waitForGatewayServing(
   const deadline = Date.now() + timeoutMs;
   let lastWrapperCpuSampleAt = 0;
   let lastWrapperCpuSeconds: number | null = null;
+  let lastWrapperCpuSampleState: GatewayWrapperCpuSampleState =
+    process.platform === "win32" ? "not-requested" : "unsupported";
+  let lastWrapperCpuSampleError: string | null = null;
+  let wrapperCpuSampleInFlight: Promise<void> | null = null;
   for (;;) {
     // A pid file alone is not evidence: the listener PID must parse, differ
     // from the pre-launch stale pid, and resolve to a live Python process.
@@ -4703,11 +4755,33 @@ async function waitForGatewayServing(
       const now = Date.now();
       if (
         process.env.AGENTERA_E2E_DIAGNOSTICS === "1" &&
-        now - lastWrapperCpuSampleAt >= 4_000
+        now - lastWrapperCpuSampleAt >= 4_000 &&
+        wrapperCpuSampleInFlight === null
       ) {
         lastWrapperCpuSampleAt = now;
-        const cpu = await sampleGatewayWrapperCpuSeconds(launchPid);
-        if (cpu !== null) lastWrapperCpuSeconds = cpu;
+        lastWrapperCpuSampleState = "pending";
+        lastWrapperCpuSampleError = null;
+        // Diagnostic sampling must never hold the readiness gate open. A
+        // cold Windows PowerShell/CIM startup can outlive several readiness
+        // polls; keep one bounded sample in flight and publish its result to
+        // the next poll instead of awaiting it here.
+        wrapperCpuSampleInFlight = sampleGatewayWrapperCpuSeconds(launchPid)
+          .then((sample) => {
+            if (sample.seconds !== null) {
+              lastWrapperCpuSeconds = sample.seconds;
+            }
+            lastWrapperCpuSampleState = sample.state;
+            lastWrapperCpuSampleError = sample.errorCode;
+          })
+          .catch(() => {
+            // The poll already records the last known value (or null). A
+            // diagnostic failure must not alter readiness or cleanup.
+            lastWrapperCpuSampleState = "error";
+            lastWrapperCpuSampleError = "sample-failed";
+          })
+          .finally(() => {
+            wrapperCpuSampleInFlight = null;
+          });
       }
     }
     gatewayReadinessDiagnostic("poll", {
@@ -4722,6 +4796,8 @@ async function waitForGatewayServing(
       wrapperPid: launchPid ?? null,
       wrapperAlive,
       wrapperCpuSeconds: lastWrapperCpuSeconds,
+      wrapperCpuSampleState: lastWrapperCpuSampleState,
+      wrapperCpuSampleError: lastWrapperCpuSampleError,
     });
     if (listenerPid !== null && apiReady) {
       return { ready: true, listenerPid, listenerEvidence };
