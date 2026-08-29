@@ -2,7 +2,10 @@ import { appendFileSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 
-import { verifyExtractedRuntimeInventoryInProcess } from "./agentera-runtime-distribution/inventory";
+import {
+  verifyExtractedRuntimeInventoryInProcess,
+  type RuntimeInventoryDiagnosticEvent,
+} from "./agentera-runtime-distribution/inventory";
 import {
   canonicalJsonBytes,
   parseRuntimeManifest,
@@ -105,12 +108,18 @@ async function main(): Promise<void> {
   helperDiagnostic("inventory-helper-request-complete");
   helperDiagnostic("inventory-walk-hash-start");
   const startedAt = Date.now();
+  const diagnosticObserver = process.env[DIAGNOSTIC_OUTPUT]?.trim()
+    ? ({ event, ...fields }: RuntimeInventoryDiagnosticEvent) =>
+        helperDiagnostic(event, fields)
+    : undefined;
   const result = await verifyExtractedRuntimeInventoryInProcess(
     request.destination,
     request.manifest,
     request.maxExtractedBytes,
     undefined,
     request.hostPlatform,
+    undefined,
+    diagnosticObserver,
   );
   helperDiagnostic("inventory-walk-hash-complete", {
     durationMs: Math.max(0, Date.now() - startedAt),

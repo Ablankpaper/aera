@@ -26,6 +26,8 @@ const RUNTIME_HASH_BUFFER_BYTES = 1024 * 1024;
 // round trips in packaged Electron on Windows.  Larger files retain the
 // positional handle path so hashing never allocates an unbounded buffer.
 const RUNTIME_HASH_READ_FILE_THRESHOLD_BYTES = 256 * 1024;
+const RUNTIME_HASH_DIAGNOSTIC_BATCH_INTERVAL = 16;
+const RUNTIME_INVENTORY_WALK_PROGRESS_INTERVAL = 512;
 const INSTALLED_METADATA_FILES = new Set([
   RUNTIME_MANIFEST_METADATA_NAME,
   RUNTIME_SIGNATURE_METADATA_NAME,
@@ -43,6 +45,41 @@ export interface RuntimeFileHashCheck {
   expectedSha256: string | null;
   size?: number;
 }
+
+export type RuntimeInventoryDiagnosticEventName =
+  | "inventory-hash-complete"
+  | "inventory-hash-progress"
+  | "inventory-hash-start"
+  | "inventory-walk-complete"
+  | "inventory-walk-progress"
+  | "inventory-walk-start";
+
+export interface RuntimeInventoryDiagnosticEvent {
+  event: RuntimeInventoryDiagnosticEventName;
+  elapsedMs: number;
+  visitedEntryCount?: number;
+  fileCount?: number;
+  extractedBytes?: number;
+  totalFileCount?: number;
+  totalBytes?: number;
+  completedFileCount?: number;
+  completedBatchCount?: number;
+  totalBatchCount?: number;
+  batchSize?: number;
+}
+
+export type RuntimeInventoryDiagnosticObserver = (
+  event: RuntimeInventoryDiagnosticEvent,
+) => void;
+
+interface RuntimeHashBatchProgress {
+  completedFileCount: number;
+  totalFileCount: number;
+  completedBatchCount: number;
+  totalBatchCount: number;
+}
+
+type RuntimeHashBatchObserver = (progress: RuntimeHashBatchProgress) => void;
 
 export type RuntimeFileHasher = (
   path: string,
@@ -66,6 +103,30 @@ export class RuntimeExtractionError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options);
     this.name = "RuntimeExtractionError";
+  }
+}
+
+function emitInventoryDiagnostic(
+  observer: RuntimeInventoryDiagnosticObserver | undefined,
+  event: RuntimeInventoryDiagnosticEvent,
+): void {
+  if (!observer) return;
+  try {
+    observer(event);
+  } catch {
+    // Diagnostic evidence must never change Runtime verification behavior.
+  }
+}
+
+function emitHashBatchProgress(
+  observer: RuntimeHashBatchObserver | undefined,
+  progress: RuntimeHashBatchProgress,
+): void {
+  if (!observer) return;
+  try {
+    observer(progress);
+  } catch {
+    // Diagnostic evidence must never change Runtime verification behavior.
   }
 }
 
@@ -296,12 +357,14 @@ export async function verifyRuntimeFileHashes(
   signal?: AbortSignal,
   fileHasher: RuntimeFileHasher = hashFile,
   concurrency = RUNTIME_HASH_CONCURRENCY,
+  observer?: RuntimeHashBatchObserver,
 ): Promise<void> {
   if (!Number.isSafeInteger(concurrency) || concurrency < 1) {
     throw new RuntimeExtractionError(
       "Runtime inventory hash concurrency must be a positive integer",
     );
   }
+  const totalBatchCount = Math.ceil(checks.length / concurrency);
   for (let offset = 0; offset < checks.length; offset += concurrency) {
     throwIfAborted(signal);
     const batch = checks.slice(offset, offset + concurrency);
@@ -321,6 +384,19 @@ export async function verifyRuntimeFileHashes(
       (result): result is PromiseRejectedResult => result.status === "rejected",
     );
     if (failure) throw failure.reason;
+    const progress = {
+      completedFileCount: Math.min(offset + batch.length, checks.length),
+      totalFileCount: checks.length,
+      completedBatchCount: Math.floor(offset / concurrency) + 1,
+      totalBatchCount,
+    };
+    if (
+      progress.completedBatchCount % RUNTIME_HASH_DIAGNOSTIC_BATCH_INTERVAL ===
+        0 ||
+      progress.completedBatchCount === totalBatchCount
+    ) {
+      emitHashBatchProgress(observer, progress);
+    }
   }
 }
 
@@ -338,7 +414,13 @@ export async function verifyExtractedRuntimeInventoryInProcess(
   signal?: AbortSignal,
   hostPlatform: NodeJS.Platform = process.platform,
   fileSystem?: RuntimeInventoryFileSystem,
+  diagnosticObserver?: RuntimeInventoryDiagnosticObserver,
 ): Promise<RuntimeExtractionResult> {
+  const walkStartedAt = Date.now();
+  emitInventoryDiagnostic(diagnosticObserver, {
+    event: "inventory-walk-start",
+    elapsedMs: 0,
+  });
   requireExtractionBudget(maxExtractedBytes);
   const inventoryFileSystem =
     fileSystem ?? (await resolveRuntimeInventoryFileSystem());
@@ -358,6 +440,19 @@ export async function verifyExtractedRuntimeInventoryInProcess(
   const fileHashChecks: RuntimeFileHashCheck[] = [];
   let fileCount = 0;
   let extractedBytes = 0;
+  let visitedEntryCount = 0;
+  let lastReportedWalkEntryCount = 0;
+
+  const reportWalkProgress = (): void => {
+    lastReportedWalkEntryCount = visitedEntryCount;
+    emitInventoryDiagnostic(diagnosticObserver, {
+      event: "inventory-walk-progress",
+      elapsedMs: Math.max(0, Date.now() - walkStartedAt),
+      visitedEntryCount,
+      fileCount,
+      extractedBytes,
+    });
+  };
 
   async function walk(
     directory: string,
@@ -495,6 +590,13 @@ export async function verifyExtractedRuntimeInventoryInProcess(
         await walk(physicalPath, relativePath);
       }
       seen.add(relativePath);
+      visitedEntryCount += 1;
+      if (
+        visitedEntryCount - lastReportedWalkEntryCount >=
+        RUNTIME_INVENTORY_WALK_PROGRESS_INTERVAL
+      ) {
+        reportWalkProgress();
+      }
     }
   }
 
@@ -510,6 +612,29 @@ export async function verifyExtractedRuntimeInventoryInProcess(
       "extracted Runtime byte count differs from the manifest",
     );
   }
+  if (lastReportedWalkEntryCount !== visitedEntryCount) {
+    reportWalkProgress();
+  }
+  emitInventoryDiagnostic(diagnosticObserver, {
+    event: "inventory-walk-complete",
+    elapsedMs: Math.max(0, Date.now() - walkStartedAt),
+    visitedEntryCount,
+    fileCount,
+    extractedBytes,
+  });
+  const hashConcurrency =
+    hostPlatform === "win32"
+      ? RUNTIME_WINDOWS_HASH_CONCURRENCY
+      : RUNTIME_HASH_CONCURRENCY;
+  const hashStartedAt = Date.now();
+  emitInventoryDiagnostic(diagnosticObserver, {
+    event: "inventory-hash-start",
+    elapsedMs: 0,
+    totalFileCount: fileHashChecks.length,
+    totalBytes: extractedBytes,
+    totalBatchCount: Math.ceil(fileHashChecks.length / hashConcurrency),
+    batchSize: hashConcurrency,
+  });
   await verifyRuntimeFileHashes(
     fileHashChecks,
     signal,
@@ -522,7 +647,18 @@ export async function verifyExtractedRuntimeInventoryInProcess(
             size,
           )
         : hashFileWithHandle(path, hashSignal, inventoryFileSystem.open, size),
-    hostPlatform === "win32" ? RUNTIME_WINDOWS_HASH_CONCURRENCY : undefined,
+    hashConcurrency,
+    (progress) =>
+      emitInventoryDiagnostic(diagnosticObserver, {
+        event: "inventory-hash-progress",
+        elapsedMs: Math.max(0, Date.now() - hashStartedAt),
+        ...progress,
+      }),
   );
+  emitInventoryDiagnostic(diagnosticObserver, {
+    event: "inventory-hash-complete",
+    elapsedMs: Math.max(0, Date.now() - hashStartedAt),
+    totalFileCount: fileHashChecks.length,
+  });
   return { fileCount, extractedBytes };
 }

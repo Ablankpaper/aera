@@ -488,6 +488,18 @@ import {
   stopHealthPolling,
 } from "../src/main/hermes";
 
+async function drainPendingGatewayRecoveries(): Promise<void> {
+  // A partial stream intentionally starts recovery without awaiting it.  The
+  // production single-flight registry lives on `process` so separate loader
+  // contexts share it; drain that registry before this fixture clears its
+  // spawn/HTTP state, or a slow prior recovery can leak into the next test.
+  const registry = (process as unknown as Record<string, unknown>)[
+    "__aeraGatewayRecoveryByProfile"
+  ];
+  if (!(registry instanceof Map)) return;
+  await Promise.allSettled([...registry.values()] as Promise<boolean>[]);
+}
+
 describe("CLI fallback session id propagation", () => {
   beforeEach(() => {
     rmSync(TEST_HOME, { recursive: true, force: true });
@@ -544,12 +556,13 @@ describe("CLI fallback session id propagation", () => {
     });
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     configureGatewayManagedConfiguration(null);
     stopGateway(undefined, true);
     stopHealthPolling();
+    await drainPendingGatewayRecoveries();
     spawned.length = 0;
-  });
+  }, gatewayRecoveryTestTimeoutMs);
 
   it("captures the quiet CLI session id from stderr so the next desktop turn can resume it", async () => {
     modelConfig.provider = "aimlapi";

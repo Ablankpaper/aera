@@ -145,6 +145,29 @@ it("bounds and overlaps final Runtime inventory hashes", async () => {
   expect(maximum).toBe(8);
 });
 
+it("bounds hash progress evidence to checkpoints and the final batch", async () => {
+  const { verifyRuntimeFileHashes } =
+    await import("../src/main/agentera-runtime-distribution/extractor");
+  const checks = Array.from({ length: 17 }, (_, index) => ({
+    physicalPath: `/runtime/file-${index}.bin`,
+    relativePath: `file-${index}.bin`,
+    expectedSha256: "a".repeat(64),
+    size: 1,
+  }));
+  const completedBatches: number[] = [];
+
+  await expect(
+    verifyRuntimeFileHashes(
+      checks,
+      undefined,
+      async () => "a".repeat(64),
+      1,
+      (progress) => completedBatches.push(progress.completedBatchCount),
+    ),
+  ).resolves.toBeUndefined();
+  expect(completedBatches).toEqual([16, 17]);
+});
+
 it("uses a higher bounded hash pool for a Windows Runtime inventory", async () => {
   const { verifyExtractedRuntimeInventoryInProcess } =
     await import("../src/main/agentera-runtime-distribution/inventory");
@@ -348,6 +371,107 @@ it("uses the bounded readFile path for small Runtime entries", async () => {
     ).resolves.toEqual({ fileCount: 1, extractedBytes: contents.length });
     expect(readFilePath).toHaveBeenCalledWith(resolvedPhysicalPath);
     expect(openFile).not.toHaveBeenCalled();
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+it("reports path-free final inventory walk and hash progress", async () => {
+  const { verifyExtractedRuntimeInventoryInProcess } =
+    await import("../src/main/agentera-runtime-distribution/inventory");
+  const root = await mkdtemp(join(tmpdir(), "aera-runtime-phase-evidence-"));
+  const first = Buffer.from("first verified Runtime entry");
+  const second = Buffer.from("second verified Runtime entry");
+  const entries = [
+    {
+      path: "first.bin",
+      kind: "file" as const,
+      size: first.length,
+      sha256: createHash("sha256").update(first).digest("hex"),
+      mode: 0o644,
+      link_target: null,
+    },
+    {
+      path: "second.bin",
+      kind: "file" as const,
+      size: second.length,
+      sha256: createHash("sha256").update(second).digest("hex"),
+      mode: 0o644,
+      link_target: null,
+    },
+  ];
+  await Promise.all([
+    writeFile(join(root, entries[0].path), first),
+    writeFile(join(root, entries[1].path), second),
+  ]);
+  const events: Record<string, unknown>[] = [];
+
+  try {
+    await expect(
+      verifyExtractedRuntimeInventoryInProcess(
+        root,
+        { platform: "windows", files: entries } as RuntimeManifest,
+        first.length + second.length,
+        undefined,
+        "win32",
+        {
+          chmod,
+          lstat,
+          open,
+          readFile,
+          readlink,
+          readdir,
+          realpath,
+        } satisfies RuntimeInventoryFileSystem,
+        (event: Record<string, unknown>) => events.push(event),
+      ),
+    ).resolves.toEqual({
+      fileCount: 2,
+      extractedBytes: first.length + second.length,
+    });
+    expect(events.map((event) => event.event)).toEqual([
+      "inventory-walk-start",
+      "inventory-walk-progress",
+      "inventory-walk-complete",
+      "inventory-hash-start",
+      "inventory-hash-progress",
+      "inventory-hash-complete",
+    ]);
+    expect(events).toEqual([
+      expect.objectContaining({ event: "inventory-walk-start" }),
+      expect.objectContaining({
+        event: "inventory-walk-progress",
+        visitedEntryCount: 2,
+        fileCount: 2,
+        extractedBytes: first.length + second.length,
+      }),
+      expect.objectContaining({
+        event: "inventory-walk-complete",
+        visitedEntryCount: 2,
+        fileCount: 2,
+        extractedBytes: first.length + second.length,
+      }),
+      expect.objectContaining({
+        event: "inventory-hash-start",
+        totalFileCount: 2,
+        totalBytes: first.length + second.length,
+      }),
+      expect.objectContaining({
+        event: "inventory-hash-progress",
+        completedFileCount: 2,
+        totalFileCount: 2,
+        completedBatchCount: 1,
+        totalBatchCount: 1,
+      }),
+      expect.objectContaining({
+        event: "inventory-hash-complete",
+        totalFileCount: 2,
+      }),
+    ]);
+    const serialized = JSON.stringify(events);
+    expect(serialized).not.toContain(root);
+    expect(serialized).not.toContain("first.bin");
+    expect(serialized).not.toContain("second.bin");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

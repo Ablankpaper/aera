@@ -25,6 +25,7 @@ import {
 } from "playwright/test";
 
 import {
+  classifyExternalCommandFailure,
   classifyLiveGatewayProcessInspectionError,
   inspectActiveGatewayProfile,
   inspectGatewayPidFile,
@@ -128,6 +129,16 @@ async function writeDiagnosticArtifact(
 
 function diagnosticErrorClass(error: unknown): string {
   if (error && typeof error === "object") {
+    const diagnosticFailure = (error as { diagnosticFailure?: unknown })
+      .diagnosticFailure;
+    if (
+      typeof diagnosticFailure === "string" &&
+      /^(?:exit_nonzero|max_output|spawn_error|timeout)$/u.test(
+        diagnosticFailure,
+      )
+    ) {
+      return diagnosticFailure;
+    }
     const code = (error as { code?: unknown }).code;
     if (typeof code === "string" && /^[A-Z0-9_]{1,32}$/u.test(code)) {
       return code.toLowerCase();
@@ -143,6 +154,9 @@ function diagnosticErrorClass(error: unknown): string {
 
 interface ExternalCommandResult {
   status: number | null;
+  errorCode: number | string | null;
+  killed: boolean;
+  signal: string | null;
   stdout: string;
   stderr: string;
 }
@@ -154,9 +168,17 @@ function runExternalCommand(
 ): Promise<ExternalCommandResult> {
   return new Promise((resolveCommand) => {
     execFile(file, [...args], options as never, (error, stdout, stderr) => {
-      const code = error && typeof error.code === "number" ? error.code : null;
+      const errorCode =
+        error &&
+        (typeof error.code === "number" || typeof error.code === "string")
+          ? error.code
+          : null;
       resolveCommand({
-        status: error === null ? 0 : code,
+        status:
+          error === null ? 0 : typeof errorCode === "number" ? errorCode : null,
+        errorCode,
+        killed: error?.killed === true,
+        signal: typeof error?.signal === "string" ? error.signal : null,
         stdout: String(stdout ?? ""),
         stderr: String(stderr ?? ""),
       });
@@ -240,8 +262,11 @@ async function queryWindowsRuntimeProcesses(
       windowsHide: true,
     },
   );
-  if (result.status !== 0) {
-    throw new Error("Windows Gateway process sample query failed");
+  const failure = classifyExternalCommandFailure(result);
+  if (failure !== null) {
+    const error = new Error("Windows Gateway process sample query failed");
+    Object.assign(error, { diagnosticFailure: failure });
+    throw error;
   }
   return parseWindowsGatewayProcessSamples(result).filter(
     (sample) =>
