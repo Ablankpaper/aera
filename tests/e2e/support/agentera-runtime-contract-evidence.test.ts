@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
+  classifyExternalCommandFailure,
   classifyLiveGatewayProcessInspectionError,
   inspectActiveGatewayProfile,
   inspectGatewayPidFile,
@@ -359,6 +360,49 @@ describe("packaged Runtime contract evidence", () => {
         stdout: JSON.stringify({ ProcessId: 4321 }),
       }),
     ).toThrow("Windows Gateway process samples are invalid");
+  });
+
+  it("classifies bounded external observer command failures", () => {
+    expect(
+      classifyExternalCommandFailure({
+        status: null,
+        errorCode: "ETIMEDOUT",
+        killed: true,
+        signal: "SIGTERM",
+      }),
+    ).toBe("timeout");
+    expect(
+      classifyExternalCommandFailure({
+        status: null,
+        errorCode: "ERR_CHILD_PROCESS_STDIO_MAXBUFFER",
+        killed: true,
+        signal: null,
+      }),
+    ).toBe("max_output");
+    expect(
+      classifyExternalCommandFailure({
+        status: 1,
+        errorCode: 1,
+        killed: false,
+        signal: null,
+      }),
+    ).toBe("exit_nonzero");
+    expect(
+      classifyExternalCommandFailure({
+        status: null,
+        errorCode: "ENOENT",
+        killed: false,
+        signal: null,
+      }),
+    ).toBe("spawn_error");
+    expect(
+      classifyExternalCommandFailure({
+        status: 0,
+        errorCode: null,
+        killed: false,
+        signal: null,
+      }),
+    ).toBeNull();
   });
 
   it("keeps only a bounded redacted Gateway stderr tail", async () => {

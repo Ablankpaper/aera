@@ -94,6 +94,44 @@ export interface WindowsGatewayProcessSample {
   threadCount: number | null;
 }
 
+export type ExternalCommandFailure =
+  | "exit_nonzero"
+  | "max_output"
+  | "spawn_error"
+  | "timeout";
+
+export interface ExternalCommandOutcome {
+  status: number | null;
+  errorCode: number | string | null;
+  killed: boolean;
+  signal: string | null;
+}
+
+/** Classify a bounded diagnostic subprocess without exposing stderr or paths. */
+export function classifyExternalCommandFailure(
+  outcome: ExternalCommandOutcome,
+): ExternalCommandFailure | null {
+  if (outcome.status === 0 && outcome.errorCode === null && !outcome.killed) {
+    return null;
+  }
+  if (outcome.errorCode === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") {
+    return "max_output";
+  }
+  if (
+    outcome.errorCode === "ETIMEDOUT" ||
+    (outcome.killed && outcome.signal !== null)
+  ) {
+    return "timeout";
+  }
+  if (
+    (outcome.status !== null && outcome.status !== 0) ||
+    typeof outcome.errorCode === "number"
+  ) {
+    return "exit_nonzero";
+  }
+  return "spawn_error";
+}
+
 export interface RuntimeCapabilitiesEvidence {
   features: {
     request_tool_policy: true;
