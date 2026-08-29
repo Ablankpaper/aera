@@ -132,7 +132,13 @@ const skippedRuntimeHealthDiagnosticJob = {
   steps: [],
 };
 
-test("candidate CI validators accept the full matrix when only the diagnostic job is skipped", async () => {
+const skippedPackagedAcceptanceJob = {
+  name: "windows-packaged-acceptance",
+  conclusion: "skipped",
+  steps: [],
+};
+
+test("candidate CI validators accept the full matrix when conditional jobs are skipped", async () => {
   const workflows = await Promise.all([
     readFile(workflowPath, "utf8"),
     readFile(productionCandidatePath, "utf8"),
@@ -144,6 +150,7 @@ test("candidate CI validators accept the full matrix when only the diagnostic jo
       skippedDiagnosticJob,
       skippedManagedGatewayDiagnosticJob,
       skippedRuntimeHealthDiagnosticJob,
+      skippedPackagedAcceptanceJob,
     ]);
     assert.equal(result.status, 0, result.stderr);
   }
