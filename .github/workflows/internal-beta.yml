@@ -106,6 +106,7 @@ jobs:
             "windows-process-tree-diagnostic",
             "windows-managed-gateway-diagnostic",
             "windows-runtime-health-diagnostic",
+            "windows-packaged-acceptance",
           ]);
           for (const job of run.jobs) {
             const executed = job.steps?.filter((step) => step.conclusion !== "skipped") ?? [];
