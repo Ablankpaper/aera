@@ -124,6 +124,8 @@ The diagnostic's six bounded phases use the same packaged Python, managed site-p
 
 The managed environment follows [[src/main/hermes.ts#buildGatewayEnv]] while replacing only the physical home and API-server key/port with disposable values. Process evidence retries only empty, timeout, query-error, or invalid-JSON Windows queries; a complete PID, creation identity, image, executable path, and command line remains required, and an identity mismatch is terminal. The diagnostic retains wrapper/listener evidence, every `gateway.pid` transition, authenticated capabilities results, import-time and faulthandler tails, cleanup attempts, and residual PIDs. A live or unverified process keeps its sandbox, so `EBUSY` cannot erase the first-failure evidence.
 
+The packaged Electron acceptance adds an external observer in the Playwright process. It samples the same Profile's stage files and lock candidates, queries the installed Runtime's Python processes through a bounded CIM command, and records parent PID, creation identity, executable image, command shape, CPU counters, thread count, and working set independently of the Electron main loop. Failure artifacts include the bounded Profile inventory, known Runtime log tails, and a redacted full readiness stderr capture; the observer is diagnostic-only and never changes the launch deadline or ownership decisions.
+
 #### Managed Gateway diagnostic test specifications
 
 Focused Node tests lock the managed invocation contract and the fail-closed evidence boundary used before any new packaged candidate is attempted.
@@ -142,7 +144,7 @@ Cleanup terminates only identity-verified wrapper/listener PIDs and never signal
 
 It preserves PID transitions, identity mismatches, import-time and faulthandler tails, and live residue; a sandbox with residual PIDs is retained and reports its reason, so `EBUSY` cannot erase the first-failure evidence.
 
-The phase summary retains wrapper/listener evidence, pid-file transitions, capabilities, tails, cleanup attempts, and sandbox outcome for the emitted artifact.
+The phase summary retains wrapper/listener evidence, pid-file transitions, capabilities, tails, cleanup attempts, and sandbox outcome for the emitted artifact. Packaged acceptance additionally emits `gateway-profile-snapshot.json`, bounded Runtime log-tail files, `electron-stderr-full.log`, and external process samples so a pre-`gateway.pid` stall can be attributed to a concrete initialization stage rather than inferred from a missing PID.
 
 Dashboard startup is fail-closed: if the shared primary-Gateway recovery returns false, it returns `running:false` before allocating a Dashboard token or port and before spawning another Runtime Python process.
 

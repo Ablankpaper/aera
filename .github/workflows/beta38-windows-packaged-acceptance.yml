@@ -1,0 +1,242 @@
+name: Beta.38 Windows packaged acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact Desktop source SHA to package and validate
+        required: true
+        type: string
+      ci_run_id:
+        description: Successful CI run for source_sha
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      source_sha:
+        description: Exact Desktop source SHA to package and validate
+        required: true
+        type: string
+      ci_run_id:
+        description: Successful CI run for source_sha
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: beta38-windows-packaged-acceptance-${{ inputs.source_sha }}
+  cancel-in-progress: false
+
+# This workflow is intentionally acceptance-only. It builds an unsigned
+# unpacked app and records evidence; it does not assemble, sign, publish, or
+# promote a candidate.
+jobs:
+  windows:
+    name: Windows x64 packaged acceptance
+    runs-on: windows-2025
+    environment: internal-beta
+    timeout-minutes: 120
+    env:
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      CI_RUN_ID: ${{ inputs.ci_run_id }}
+
+    steps:
+      - name: Check out exact Desktop source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify exact source and successful CI checkpoint
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ($env:SOURCE_SHA -notmatch '^[0-9a-f]{40}$') {
+            throw "source_sha must be a full lowercase commit SHA"
+          }
+          if ($env:CI_RUN_ID -notmatch '^[1-9][0-9]*$') {
+            throw "ci_run_id must be a positive decimal run ID"
+          }
+          $checkedOut = (git rev-parse HEAD).Trim()
+          if ($checkedOut -cne $env:SOURCE_SHA) {
+            throw "Checked out source differs from source_sha"
+          }
+          $packageVersion = (node -p "require('./package.json').version").Trim()
+          if ($packageVersion -cne '0.7.4-internal-beta.38') {
+            throw "Unexpected Desktop version: $packageVersion"
+          }
+          $headers = @{
+            Accept = 'application/vnd.github+json'
+            Authorization = "Bearer $env:GH_TOKEN"
+            'X-GitHub-Api-Version' = '2022-11-28'
+          }
+          $run = Invoke-RestMethod `
+            -Headers $headers `
+            -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/actions/runs/$env:CI_RUN_ID" `
+            -Method Get
+          if ($run.name -cne 'CI' -or $run.head_sha -cne $env:SOURCE_SHA) {
+            throw 'Supplied CI run is not for the exact Desktop source'
+          }
+          if ($run.head_branch -cne 'main' -or $run.conclusion -cne 'success') {
+            throw 'Supplied CI run is not a successful main checkpoint'
+          }
+
+      - name: Require native Windows x64 runner
+        shell: pwsh
+        run: |
+          $architecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
+          if ($architecture -cne 'X64' -or $env:PROCESSOR_ARCHITECTURE -ne 'AMD64') {
+            throw "Acceptance requires native Windows x64 (reported $architecture/$env:PROCESSOR_ARCHITECTURE)"
+          }
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Prepare and verify locked Runtime Seed
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.AERA_CROSS_REPO_READ_TOKEN || github.token }}
+        run: |
+          npm run prepare:runtime-seed -- --platform windows --arch x64
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm run verify:packaged-runtime-seed -- `
+            resources/agentera-runtime-seed `
+            --desktop-version '0.7.4-internal-beta.38'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Rebuild native dependencies for x64
+        run: npx electron-builder install-app-deps --arch=x64
+
+      - name: Build Desktop with the protected Beta trust root
+        shell: pwsh
+        env:
+          VITE_ANALYTICS_BASE_URL: ${{ vars.VITE_ANALYTICS_BASE_URL }}
+          VITE_ANALYTICS_API_KEY: ${{ secrets.VITE_ANALYTICS_API_KEY }}
+          MAIN_VITE_HERMES_API_URL: ${{ vars.HERMES_API_URL }}
+          MAIN_VITE_HERMES_API_KEY: ${{ secrets.HERMES_API_KEY }}
+          MAIN_VITE_AGENTERA_CLOUD_PUBLIC_URL: ${{ vars.AERA_INTERNAL_BETA_ORIGIN }}
+          MAIN_VITE_AGENTERA_OFFLINE_PUBLIC_KEYS_JSON: >-
+            {"issuer":"${{ vars.AERA_INTERNAL_BETA_ORIGIN }}","keys":[{"keyId":"${{ vars.AERA_INTERNAL_BETA_OFFLINE_KEY_ID }}","publicKey":"${{ vars.AERA_INTERNAL_BETA_OFFLINE_PUBLIC_KEY }}"}]}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:MAIN_VITE_AGENTERA_CLOUD_PUBLIC_URL)) {
+            throw 'Internal Beta Cloud origin is missing'
+          }
+          npm run build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Package unsigned unpacked Windows app only
+        shell: pwsh
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: |
+          npx electron-builder `
+            --config build/electron-builder.internal-beta.yml `
+            --win dir --x64 --publish never `
+            --config.forceCodeSigning=false
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Verify packaged Main, Preload, and Renderer startup
+        shell: pwsh
+        run: |
+          $unpacked = @(Get-ChildItem dist -Directory | Where-Object { $_.Name -like '*unpacked' })
+          if ($unpacked.Count -ne 1) { throw 'Expected exactly one unpacked Windows app' }
+          $evidenceRoot = Join-Path $env:RUNNER_TEMP 'beta38-windows-packaged-acceptance'
+          New-Item -ItemType Directory -Force -Path $evidenceRoot | Out-Null
+          $appPath = $unpacked[0].FullName
+          $output = Join-Path $evidenceRoot 'packaged-startup-windows.json'
+          node scripts/release/verify-packaged-startup.mjs `
+            --app $appPath `
+            --platform win32 `
+            --architecture x64 `
+            --source-sha $env:SOURCE_SHA `
+            --desktop-version '0.7.4-internal-beta.38' `
+            --output $output
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Test-Path -LiteralPath $output -PathType Leaf)) {
+            throw 'Packaged Windows startup evidence is missing'
+          }
+          $startup = Get-Content -LiteralPath $output -Raw | ConvertFrom-Json
+          if ($startup.sourceSha -cne $env:SOURCE_SHA -or
+              $startup.platform -cne 'win32' -or
+              $startup.architecture -cne 'x64' -or
+              $startup.renderer.rendererReadyAccepted -ne $true) {
+            throw 'Packaged startup evidence does not match the acceptance target'
+          }
+
+      - name: Verify live packaged Runtime and Gateway contract
+        shell: pwsh
+        run: |
+          $unpacked = @(Get-ChildItem dist -Directory | Where-Object { $_.Name -like '*unpacked' })
+          if ($unpacked.Count -ne 1) { throw 'Expected exactly one unpacked Windows app' }
+          $evidenceRoot = Join-Path $env:RUNNER_TEMP 'beta38-windows-packaged-acceptance'
+          $diagnosticRoot = Join-Path $evidenceRoot 'runtime-contract-diagnostics'
+          New-Item -ItemType Directory -Force -Path $diagnosticRoot | Out-Null
+          $env:AGENTERA_E2E_EXECUTABLE_PATH = Join-Path $unpacked[0].FullName 'Aera.exe'
+          $env:AGENTERA_RUNTIME_SEED_DIR = Join-Path $unpacked[0].FullName 'resources/agentera-runtime-seed'
+          $env:AGENTERA_E2E_RUNTIME_CONTRACT_OUTPUT = Join-Path $evidenceRoot 'packaged-runtime-contract-windows.json'
+          $env:AGENTERA_E2E_RUNTIME_CONTRACT_DIAGNOSTIC_OUTPUT = Join-Path $diagnosticRoot 'events.jsonl'
+          $env:AERA_RUNTIME_INVENTORY_DIAGNOSTIC_OUTPUT = Join-Path $diagnosticRoot 'inventory-events.jsonl'
+          $env:AGENTERA_E2E_SOURCE_SHA = $env:SOURCE_SHA
+          & npx playwright test tests/e2e/agentera-runtime-contract.e2e.ts 2>&1 |
+            Tee-Object -FilePath (Join-Path $diagnosticRoot 'playwright.log')
+          $exitCode = $LASTEXITCODE
+          if ($exitCode -ne 0) { exit $exitCode }
+          $contractPath = $env:AGENTERA_E2E_RUNTIME_CONTRACT_OUTPUT
+          if (-not (Test-Path -LiteralPath $contractPath -PathType Leaf)) {
+            throw 'Packaged Windows Runtime contract evidence is missing'
+          }
+          $contract = Get-Content -LiteralPath $contractPath -Raw | ConvertFrom-Json
+          if ($contract.sourceSha -cne $env:SOURCE_SHA -or
+              $contract.platform -cne 'win32' -or
+              $contract.architecture -cne 'x64' -or
+              [int]$contract.gateway.pid -le 0 -or
+              [int]$contract.gateway.port -le 0 -or
+              $contract.capabilities.features.request_tool_policy -ne $true -or
+              $contract.capabilities.features.request_model_route -ne $true -or
+              $contract.capabilities.endpoints.chat_completions.path -cne '/v1/chat/completions') {
+            throw 'Packaged Runtime contract evidence is incomplete or unhealthy'
+          }
+
+      - name: Prove no acceptance-owned process remains
+        if: ${{ always() }}
+        shell: pwsh
+        run: |
+          $evidenceRoot = Join-Path $env:RUNNER_TEMP 'beta38-windows-packaged-acceptance'
+          New-Item -ItemType Directory -Force -Path $evidenceRoot | Out-Null
+          $rows = @(Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object {
+            $text = "$(if ($null -eq $_.ExecutablePath) { '' } else { $_.ExecutablePath }) $(if ($null -eq $_.CommandLine) { '' } else { $_.CommandLine })"
+            $text -match '(?i)aera-runtime-contract-|aera-packaged-startup-'
+          } | Select-Object ProcessId, Name, ExecutablePath, CommandLine)
+          $sweep = [ordered]@{
+            schemaVersion = 1
+            residualPids = @($rows | ForEach-Object { [int]$_.ProcessId })
+            inspectedAt = [DateTime]::UtcNow.ToString('o')
+          }
+          $sweep | ConvertTo-Json -Depth 5 | Set-Content `
+            -LiteralPath (Join-Path $evidenceRoot 'process-sweep.json') `
+            -Encoding utf8
+          if ($rows.Count -ne 0) {
+            $rows | Format-List | Out-String | Write-Error
+            throw "Acceptance-owned processes remain: $($sweep.residualPids -join ',')"
+          }
+
+      - name: Upload Windows packaged acceptance evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: beta38-windows-packaged-acceptance-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/beta38-windows-packaged-acceptance
+          if-no-files-found: warn
+          retention-days: 30
+          compression-level: 0

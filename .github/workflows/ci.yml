@@ -20,8 +20,18 @@ on:
           - windows-process-tree-diagnostic
           - windows-managed-gateway-diagnostic
           - windows-runtime-health-diagnostic
+          - windows-packaged-acceptance
+      source_sha:
+        description: Exact source SHA for windows-packaged-acceptance
+        required: false
+        type: string
+      ci_run_id:
+        description: Successful CI run ID for windows-packaged-acceptance
+        required: false
+        type: string
 
 permissions:
+  actions: read
   contents: read
 
 env:
@@ -144,6 +154,7 @@ jobs:
         continue-on-error: true
 
   windows-model-recovery:
+    if: github.event_name != 'workflow_dispatch' || inputs.mode == 'full'
     name: windows-model-recovery
     runs-on: windows-latest
     timeout-minutes: 10
@@ -177,6 +188,15 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           compression-level: 0
+
+  windows-packaged-acceptance:
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'windows-packaged-acceptance'
+    name: windows-packaged-acceptance
+    uses: ./.github/workflows/beta38-windows-packaged-acceptance.yml
+    with:
+      source_sha: ${{ inputs.source_sha }}
+      ci_run_id: ${{ inputs.ci_run_id }}
+    secrets: inherit
 
   windows-process-tree-diagnostic:
     if: github.event_name == 'workflow_dispatch' && inputs.mode == 'windows-process-tree-diagnostic'

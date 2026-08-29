@@ -12,6 +12,7 @@ import {
   inspectInstalledRuntimeContract,
   inspectLiveGatewayProcess,
   inspectLiveGatewayEndpoint,
+  parseWindowsGatewayProcessSamples,
   parseWindowsProcessIdentityProbe,
   probeRuntimeCapabilities,
   readRedactedGatewayLogTail,
@@ -319,6 +320,45 @@ describe("packaged Runtime contract evidence", () => {
       executable: "C:\\runtime\\python.exe",
       command: "C:\\runtime\\python.exe -m hermes_cli.main gateway",
     });
+  });
+
+  it("parses deterministic Windows Gateway CPU and ownership samples", () => {
+    const samples = parseWindowsGatewayProcessSamples({
+      status: 0,
+      stdout: JSON.stringify([
+        {
+          ProcessId: 4321,
+          ParentProcessId: 1111,
+          Name: "python.exe",
+          ExecutablePath: "C:\\runtime\\python.exe",
+          CommandLine: '"C:\\runtime\\python.exe" -m hermes_cli.main gateway',
+          CreationFileTimeUtc: "133700000000000000",
+          KernelModeTime100ns: "10000000",
+          UserModeTime100ns: "25000000",
+          WorkingSetBytes: "40960000",
+          ThreadCount: 12,
+        },
+      ]),
+    });
+    expect(samples).toEqual([
+      {
+        pid: 4321,
+        parentPid: 1111,
+        name: "python.exe",
+        executablePath: "C:\\runtime\\python.exe",
+        commandLine: '"C:\\runtime\\python.exe" -m hermes_cli.main gateway',
+        creationIdentity: "windows:133700000000000000",
+        cpuSeconds: 3.5,
+        workingSetBytes: 40960000,
+        threadCount: 12,
+      },
+    ]);
+    expect(() =>
+      parseWindowsGatewayProcessSamples({
+        status: 0,
+        stdout: JSON.stringify({ ProcessId: 4321 }),
+      }),
+    ).toThrow("Windows Gateway process samples are invalid");
   });
 
   it("keeps only a bounded redacted Gateway stderr tail", async () => {
