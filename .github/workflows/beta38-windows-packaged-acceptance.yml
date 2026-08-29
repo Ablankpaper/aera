@@ -11,6 +11,16 @@ on:
         description: Successful CI run for source_sha
         required: true
         type: string
+  workflow_call:
+    inputs:
+      source_sha:
+        description: Exact Desktop source SHA to package and validate
+        required: true
+        type: string
+      ci_run_id:
+        description: Successful CI run for source_sha
+        required: true
+        type: string
 
 permissions:
   actions: read
