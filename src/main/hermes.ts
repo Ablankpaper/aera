@@ -107,6 +107,10 @@ import {
 } from "./host-derived-env";
 import { hydrateProfileRuntimeEnv } from "./profile-runtime-env";
 import {
+  buildGatewayStartupDiagnosticScript,
+  GATEWAY_STARTUP_TRACE_ENV,
+} from "./gateway-startup-diagnostic";
+import {
   GatewayProcessOwnershipError,
   GatewayProcessOwnershipLedger,
   type GatewayProcessOwnershipErrorCode,
@@ -4166,6 +4170,28 @@ function gatewayLogPath(profile?: string): string {
   return join(logDir, "gateway-stderr.log");
 }
 
+function gatewayStartupTraceEnabled(): boolean {
+  return process.env[GATEWAY_STARTUP_TRACE_ENV] === "1";
+}
+
+function gatewayStartupTracePaths(profile?: string): {
+  tracePath: string;
+  stackPath: string;
+} | null {
+  if (!gatewayStartupTraceEnabled()) return null;
+  const logDir = join(profileHome(resolveProfile(profile)), "logs");
+  try {
+    mkdirSync(logDir, { recursive: true });
+  } catch {
+    // The child will report an unavailable trace path; startup diagnostics
+    // must never turn a normal launch failure into an uncaught exception.
+  }
+  return {
+    tracePath: join(logDir, "gateway-startup-trace.jsonl"),
+    stackPath: join(logDir, "gateway-startup-stack.log"),
+  };
+}
+
 export function buildGatewayEnv(
   profile?: string,
   prepared?: PreparedGatewayLaunch,
@@ -4329,6 +4355,19 @@ export function startGatewayDetailed(
     return { success: false, running: false, error };
   }
 
+  // The packaged-boundary trace is strictly opt-in and diagnostic-only. It
+  // wraps the same Hermes module in a Python `-c` dispatcher so we can see the
+  // first startup function that fails to return when the normal child remains
+  // alive without writing gateway.pid. No production launch receives these
+  // variables or altered argv.
+  const startupTracePaths = gatewayStartupTracePaths(profile);
+  if (startupTracePaths !== null) {
+    gatewayEnv[GATEWAY_STARTUP_TRACE_ENV] = "1";
+    gatewayEnv.AERA_GATEWAY_STARTUP_TRACE_PATH = startupTracePaths.tracePath;
+    gatewayEnv.AERA_GATEWAY_STARTUP_STACK_PATH = startupTracePaths.stackPath;
+    gatewayEnv.PYTHONFAULTHANDLER = "1";
+  }
+
   // Route stderr to a log file so startup errors are visible for debugging.
   // Per-profile log dir so a named profile's failures (e.g. a duplicate bot
   // token, which the gateway refuses to start with) don't get mixed into the
@@ -4368,7 +4407,20 @@ export function startGatewayDetailed(
       profileId: key,
       preLaunchPid: readPidFile(profile),
     });
-    spawnArgs = invocation.cliArgs(cliArgs);
+    spawnArgs =
+      startupTracePaths === null
+        ? invocation.cliArgs(cliArgs)
+        : ["-c", buildGatewayStartupDiagnosticScript(resolveProfile(profile))];
+    gatewayReadinessDiagnostic("spawn-options", {
+      platform: process.platform,
+      detached: process.platform !== "win32",
+      windowsHide: HIDDEN_SUBPROCESS_OPTIONS.windowsHide === true,
+      stdinMode: "ignore",
+      stdoutMode: "ignore",
+      stderrMode: stderrFd >= 0 ? "file" : "ignore",
+      diagnosticWrapper: startupTracePaths !== null,
+      argvMode: startupTracePaths === null ? "runtime-cli" : "python-c-wrapper",
+    });
     proc = spawn(invocation.python, spawnArgs, {
       cwd: invocation.workingDirectory,
       env: gatewayEnv,

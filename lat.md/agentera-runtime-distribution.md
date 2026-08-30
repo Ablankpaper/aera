@@ -128,6 +128,8 @@ The packaged Electron acceptance adds an external observer in the Playwright pro
 
 Packaged acceptance keeps that observer enabled by default. A single explicitly requested `AGENTERA_E2E_GATEWAY_OBSERVER=disabled` diagnostic run may omit the external process-table query and records the omission as evidence; unknown values keep observation enabled.
 
+The standalone `.github/workflows/beta38-windows-packaged-boundary-diagnostic.yml` workflow is the next-stage boundary probe for a packaged Electron failure that cannot be reproduced by the Runtime-only diagnostic. It builds an unsigned unpacked app from one explicit source SHA with disposable build-time trust data, disables only the external CIM observer, and sets `AGENTERA_E2E_GATEWAY_STARTUP_TRACE=1`. That opt-in path wraps the unchanged `hermes_cli.main gateway` dispatch in a temporary Python tracing program. The wrapper records the child stdin/console/job context, bounded function-entry/return markers through `write_pid_file`, and periodic `faulthandler` stacks; Desktop records its actual spawn options alongside it. Trace files are copied into the failure artifact before cleanup, and the workflow never uses the internal-Beta environment, signing credentials, candidate assembly, promotion, or publication.
+
 #### Managed Gateway diagnostic test specifications
 
 Focused Node tests lock the managed invocation contract and the fail-closed evidence boundary used before any new packaged candidate is attempted.

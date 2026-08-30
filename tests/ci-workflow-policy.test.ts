@@ -242,4 +242,24 @@ describe("CI workflow policy", () => {
       run: "node --test scripts/diagnose-windows-serve-help.test.mjs",
     });
   });
+
+  it("keeps the packaged Gateway boundary trace evidence-only", () => {
+    const workflow = readFileSync(
+      resolve(
+        ".github/workflows/beta38-windows-packaged-boundary-diagnostic.yml",
+      ),
+      "utf8",
+    );
+    expect(workflow).toContain('AGENTERA_E2E_GATEWAY_STARTUP_TRACE: "1"');
+    expect(workflow).toContain("AGENTERA_E2E_GATEWAY_OBSERVER: disabled");
+    expect(workflow).toContain("--win dir --x64 --publish never");
+    expect(workflow).toContain("actions/upload-artifact@v4");
+    expect(workflow).not.toContain("environment: internal-beta");
+    expect(workflow).not.toContain("secrets.");
+    expect(workflow).not.toContain(".github/workflows/internal-beta.yml");
+    expect(workflow).not.toContain(
+      ".github/workflows/internal-beta-promote.yml",
+    );
+    expect(workflow).not.toContain("publish-desktop-update");
+  });
 });
