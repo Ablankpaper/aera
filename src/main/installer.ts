@@ -38,6 +38,7 @@ import {
   type PackagedSeedInstallResult,
 } from "./agentera-runtime-distribution/seed-installer";
 import { loadRuntimeTrustFile } from "./agentera-runtime-distribution/trust";
+import { createPackagedSeedInstallDiagnostic } from "./runtime-install-lifecycle-diagnostics";
 
 const IS_WINDOWS = process.platform === "win32";
 
@@ -761,9 +762,7 @@ export async function runHermesUpdate(
 ): Promise<void> {
   const invocation = getRuntimeInvocation();
   if (invocation === null) {
-    throw new Error(
-      "Aera Runtime is not installed. Please install it first.",
-    );
+    throw new Error("Aera Runtime is not installed. Please install it first.");
   }
   if (invocation.source === "managed") {
     throw new Error(
@@ -902,6 +901,7 @@ export async function runPackagedSeedInstall(
       log += line;
       onProgress({ ...progress, log });
     },
+    onDiagnostic: createPackagedSeedInstallDiagnostic(),
   });
   if (result.status === "installed") {
     clearVersionCache();

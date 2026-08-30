@@ -305,6 +305,61 @@ describe("packaged Runtime Seed discovery and installation", () => {
     expect(await readdir(setup.paths.staging)).toEqual(["keep-unrelated"]);
   });
 
+  it("reports the health failure and transaction cleanup boundaries", async () => {
+    const setup = await harness({
+      healthCheck: vi.fn(async () => {
+        throw new Error("health failed");
+      }),
+    });
+    const diagnostics: string[] = [];
+
+    const result = await installPackagedSeed({
+      ...setup.options,
+      onDiagnostic: (event: string) => diagnostics.push(event),
+    });
+
+    expect(result).toMatchObject({
+      status: "repair-required",
+      errorCode: "runtime-health-failed",
+    });
+    expect(diagnostics).toEqual([
+      "install-start",
+      "seed-verification-start",
+      "seed-verification-complete",
+      "disk-budget-start",
+      "disk-budget-complete",
+      "transaction-created",
+      "extraction-start",
+      "extraction-complete",
+      "health-start",
+      "health-failed",
+      "transaction-cleanup-start",
+      "transaction-cleanup-complete",
+      "install-complete",
+    ]);
+  });
+
+  it("does not let a diagnostic observer error change installation cleanup", async () => {
+    const setup = await harness({
+      healthCheck: vi.fn(async () => {
+        throw new Error("health failed");
+      }),
+    });
+
+    const result = await installPackagedSeed({
+      ...setup.options,
+      onDiagnostic: () => {
+        throw new Error("observer failed");
+      },
+    });
+
+    expect(result).toMatchObject({
+      status: "repair-required",
+      errorCode: "runtime-health-failed",
+    });
+    await expect(readdir(setup.paths.staging)).resolves.toEqual([]);
+  });
+
   it("does not delete a colliding staging transaction it did not create", async () => {
     const setup = await harness();
     const collision = join(setup.paths.staging, "seed-111111112222");
