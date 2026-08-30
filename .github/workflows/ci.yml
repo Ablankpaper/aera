@@ -29,6 +29,14 @@ on:
         description: Successful CI run ID for windows-packaged-acceptance
         required: false
         type: string
+      gateway_observer:
+        description: External Gateway process observer mode for windows-packaged-acceptance
+        required: false
+        default: enabled
+        type: choice
+        options:
+          - enabled
+          - disabled
 
 permissions:
   actions: read
@@ -196,6 +204,7 @@ jobs:
     with:
       source_sha: ${{ inputs.source_sha }}
       ci_run_id: ${{ inputs.ci_run_id }}
+      gateway_observer: ${{ inputs.gateway_observer || 'enabled' }}
     secrets: inherit
 
   windows-process-tree-diagnostic:

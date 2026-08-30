@@ -27,6 +27,10 @@ const ciWorkflowPath = new URL(
   "../../.github/workflows/ci.yml",
   import.meta.url,
 );
+const windowsPackagedAcceptancePath = new URL(
+  "../../.github/workflows/beta38-windows-packaged-acceptance.yml",
+  import.meta.url,
+);
 const promotionWorkflowPath = new URL(
   "../../.github/workflows/internal-beta-promote.yml",
   import.meta.url,
@@ -741,6 +745,29 @@ test("Internal Beta candidate probes the live packaged Runtime contract on both 
   }
   assert.match(raw, /packaged-runtime-contract-macos/u);
   assert.match(raw, /packaged-runtime-contract-windows/u);
+});
+
+test("Windows packaged diagnostic can disable only its external Gateway observer", async () => {
+  const raw = await readFile(windowsPackagedAcceptancePath, "utf8");
+  const workflow = parseYAML(raw);
+  const input = workflow.on.workflow_dispatch.inputs.gateway_observer;
+  assert.deepEqual(input, {
+    description:
+      "External Gateway process observer mode for one diagnostic run",
+    required: false,
+    default: "enabled",
+    type: "choice",
+    options: ["enabled", "disabled"],
+  });
+  const runtimeStep = workflow.jobs.windows.steps.find(
+    (candidate) =>
+      candidate.name === "Verify live packaged Runtime and Gateway contract",
+  );
+  assert.ok(runtimeStep);
+  assert.match(
+    runtimeStep.run,
+    /AGENTERA_E2E_GATEWAY_OBSERVER = \$env:GATEWAY_OBSERVER/u,
+  );
 });
 
 test("Windows packaged Runtime failures preserve bounded stage diagnostics", async () => {

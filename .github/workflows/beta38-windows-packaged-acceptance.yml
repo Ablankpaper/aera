@@ -11,6 +11,14 @@ on:
         description: Successful CI run for source_sha
         required: true
         type: string
+      gateway_observer:
+        description: External Gateway process observer mode for one diagnostic run
+        required: false
+        default: enabled
+        type: choice
+        options:
+          - enabled
+          - disabled
   workflow_call:
     inputs:
       source_sha:
@@ -20,6 +28,11 @@ on:
       ci_run_id:
         description: Successful CI run for source_sha
         required: true
+        type: string
+      gateway_observer:
+        description: External Gateway process observer mode for one diagnostic run
+        required: false
+        default: enabled
         type: string
 
 permissions:
@@ -42,6 +55,7 @@ jobs:
     env:
       SOURCE_SHA: ${{ inputs.source_sha }}
       CI_RUN_ID: ${{ inputs.ci_run_id }}
+      GATEWAY_OBSERVER: ${{ inputs.gateway_observer || 'enabled' }}
 
     steps:
       - name: Check out exact Desktop source
@@ -188,6 +202,7 @@ jobs:
           $env:AGENTERA_E2E_RUNTIME_CONTRACT_DIAGNOSTIC_OUTPUT = Join-Path $diagnosticRoot 'events.jsonl'
           $env:AGENTERA_RUNTIME_INVENTORY_DIAGNOSTIC_OUTPUT = Join-Path $diagnosticRoot 'inventory-events.jsonl'
           $env:AGENTERA_E2E_SOURCE_SHA = $env:SOURCE_SHA
+          $env:AGENTERA_E2E_GATEWAY_OBSERVER = $env:GATEWAY_OBSERVER
           & npx playwright test tests/e2e/agentera-runtime-contract.e2e.ts 2>&1 |
             Tee-Object -FilePath (Join-Path $diagnosticRoot 'playwright.log')
           $exitCode = $LASTEXITCODE

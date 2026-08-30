@@ -31,6 +31,20 @@ function functionDeclaration(name: string): ts.FunctionDeclaration {
 }
 
 describe("packaged Runtime contract observer boundaries", () => {
+  it("supports an explicit observer-off diagnostic mode", () => {
+    expect(observerSourceText).toContain("shouldStartGatewayLaunchObserver");
+    expect(observerSourceText).toContain("AGENTERA_E2E_GATEWAY_OBSERVER");
+    expect(observerSourceText).toContain("gateway-external-observer-disabled");
+    const launch = observerSourceText.indexOf(
+      "gatewayLaunchObserver = startGatewayLaunchObserver",
+    );
+    const guard = observerSourceText.indexOf(
+      "if (shouldStartGatewayLaunchObserver())",
+    );
+    expect(guard).toBeGreaterThanOrEqual(0);
+    expect(launch).toBeGreaterThan(guard);
+  });
+
   it("keeps Runtime installation at the Profile-stage-only observer mode", () => {
     const source = functionDeclaration("startRuntimeInstallObserver").getText(
       observerSource,
