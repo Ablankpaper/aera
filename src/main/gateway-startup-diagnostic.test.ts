@@ -37,4 +37,16 @@ describe("gateway startup boundary diagnostic", () => {
     expect(script).not.toContain("/Users/");
     expect(script).not.toContain("C:\\\\");
   });
+
+  it("keeps the diagnostic profiler on the launch thread", () => {
+    const script = buildGatewayStartupDiagnosticScript();
+
+    expect(script).toContain("sys.setprofile(_profile)");
+    expect(script).not.toContain("threading.setprofile(_profile)");
+    expect(script).not.toContain("threading.current_thread()");
+    expect(script).not.toContain("def _file_allowed");
+    expect(script).toContain(
+      "if short not in TARGETS and qualified not in TARGETS: return _profile",
+    );
+  });
 });
