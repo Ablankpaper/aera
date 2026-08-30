@@ -38,6 +38,10 @@ vi.mock("../src/main/agentera-runtime-distribution/trust", () => ({
 const roots: string[] = [];
 
 beforeEach(async () => {
+  // This test exercises installer option wiring, not native-target admission.
+  // Pin one supported target so the same contract runs on Linux CI as well.
+  vi.spyOn(process, "platform", "get").mockReturnValue("darwin");
+  vi.spyOn(process, "arch", "get").mockReturnValue("arm64");
   const root = await mkdtemp(join(tmpdir(), "aera-installer-runtime-diag-"));
   roots.push(root);
   mocks.userData = join(root, "user-data");
@@ -59,6 +63,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   delete process.env.AGENTERA_E2E_DIAGNOSTICS;
   delete process.env.AGENTERA_E2E_RUNTIME_CONTRACT_DIAGNOSTIC_OUTPUT;
   delete process.env.AGENTERA_RUNTIME_SEED_DIR;
