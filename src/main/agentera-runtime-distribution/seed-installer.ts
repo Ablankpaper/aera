@@ -95,6 +95,32 @@ type RuntimeHealthCheck = (
   options: RuntimeHealthCheckOptions,
 ) => Promise<RuntimeHealthCheckResult>;
 
+export type PackagedSeedInstallDiagnosticEvent =
+  | "install-start"
+  | "seed-verification-start"
+  | "seed-verification-complete"
+  | "disk-budget-start"
+  | "disk-budget-complete"
+  | "transaction-created"
+  | "extraction-start"
+  | "extraction-complete"
+  | "health-start"
+  | "health-complete"
+  | "health-failed"
+  | "publish-start"
+  | "publish-complete"
+  | "activation-start"
+  | "activation-complete"
+  | "transaction-cleanup-start"
+  | "transaction-cleanup-complete"
+  | "transaction-cleanup-failed"
+  | "install-complete";
+
+export type PackagedSeedInstallDiagnostic = (
+  event: PackagedSeedInstallDiagnosticEvent,
+  fields?: Readonly<Record<string, boolean | number | string | null>>,
+) => void;
+
 export interface PackagedSeedInstallerOptions {
   paths: RuntimeDistributionPaths;
   trustedPublicKeys: ReadonlyMap<string, string>;
@@ -108,6 +134,8 @@ export interface PackagedSeedInstallerOptions {
   now?: () => Date;
   randomId?: () => string;
   onProgress?: (progress: PackagedSeedInstallProgress) => void;
+  /** Diagnostic-only lifecycle hook; it must never influence installation. */
+  onDiagnostic?: PackagedSeedInstallDiagnostic;
   signal?: AbortSignal;
 }
 
@@ -402,18 +430,46 @@ function asInstallError(
     : new PackagedSeedInstallError(code, action, message, { cause: error });
 }
 
+function emitDiagnostic(
+  options: PackagedSeedInstallerOptions,
+  event: PackagedSeedInstallDiagnosticEvent,
+  fields: Readonly<Record<string, boolean | number | string | null>> = {},
+): void {
+  try {
+    options.onDiagnostic?.(event, fields);
+  } catch {
+    // Diagnostic observers are strictly best-effort and must never change the
+    // install result or its cleanup path.
+  }
+}
+
 // @lat: [[agentera-runtime-distribution#Offline Seed installation and repair]]
 export async function installPackagedSeed(
   options: PackagedSeedInstallerOptions,
 ): Promise<PackagedSeedInstallResult> {
+  emitDiagnostic(options, "install-start");
+  try {
+    return await installPackagedSeedInternal(options);
+  } finally {
+    emitDiagnostic(options, "install-complete");
+  }
+}
+
+async function installPackagedSeedInternal(
+  options: PackagedSeedInstallerOptions,
+): Promise<PackagedSeedInstallResult> {
   let seed: VerifiedPackagedRuntimeSeed;
   try {
+    emitDiagnostic(options, "seed-verification-start");
     progress(options.onProgress, 1, "Verifying the packaged Runtime Seed");
     await ensureRuntimeDistributionDirectories(options.paths);
     seed = await verifyPackagedRuntimeSeed({
       packagedSeedDirectory: options.paths.packagedSeed,
       trustedPublicKeys: options.trustedPublicKeys,
       manifestContext: options.manifestContext,
+    });
+    emitDiagnostic(options, "seed-verification-complete", {
+      runtimeVersion: seed.manifest.runtime_version,
     });
   } catch (error) {
     return failureResult(
@@ -430,6 +486,7 @@ export async function installPackagedSeed(
 
   let requiredDiskBytes: number;
   try {
+    emitDiagnostic(options, "disk-budget-start");
     requiredDiskBytes = calculatePackagedSeedDiskBudget(seed.manifest);
     const available = await options.availableDiskBytes(options.paths.root);
     if (!Number.isSafeInteger(available) || available < 0) {
@@ -446,6 +503,9 @@ export async function installPackagedSeed(
         "not enough disk space for Aera Runtime",
       );
     }
+    emitDiagnostic(options, "disk-budget-complete", {
+      requiredDiskBytes,
+    });
   } catch (error) {
     return failureResult(
       asInstallError(
@@ -482,6 +542,8 @@ export async function installPackagedSeed(
   try {
     await mkdir(transaction, { recursive: false, mode: 0o700 });
     transactionCreated = true;
+    emitDiagnostic(options, "transaction-created");
+    emitDiagnostic(options, "extraction-start");
     progress(options.onProgress, 2, "Extracting the verified local Runtime");
     try {
       await (options.extractor ?? extractRuntimeArchive)({
@@ -499,7 +561,9 @@ export async function installPackagedSeed(
         { cause: error },
       );
     }
+    emitDiagnostic(options, "extraction-complete");
 
+    emitDiagnostic(options, "health-start");
     progress(options.onProgress, 3, "Checking Runtime health in isolation");
     try {
       await (options.healthCheck ?? runIsolatedRuntimeHealthCheck)({
@@ -507,7 +571,9 @@ export async function installPackagedSeed(
         manifest: seed.manifest,
         signal: options.signal,
       });
+      emitDiagnostic(options, "health-complete");
     } catch (error) {
+      emitDiagnostic(options, "health-failed");
       throw new PackagedSeedInstallError(
         "runtime-health-failed",
         "retry",
@@ -516,6 +582,7 @@ export async function installPackagedSeed(
       );
     }
 
+    emitDiagnostic(options, "publish-start");
     progress(options.onProgress, 4, "Publishing the verified Runtime version");
     await Promise.all([
       writeFile(
@@ -570,7 +637,9 @@ export async function installPackagedSeed(
       options.stateStore ?? new RuntimeStateStore(options.paths)
     ).setCurrent(pointer);
     pointerPublished = true;
+    emitDiagnostic(options, "publish-complete");
 
+    emitDiagnostic(options, "activation-start");
     progress(options.onProgress, 5, "Activating the local managed Runtime");
     (options.selectManagedRuntime ?? selectManagedRuntime)();
     const invocation = (
@@ -583,6 +652,7 @@ export async function installPackagedSeed(
         "installed Runtime could not become the live managed Runtime",
       );
     }
+    emitDiagnostic(options, "activation-complete");
     return {
       status: "installed",
       runtimeVersion: seed.manifest.runtime_version,
@@ -610,9 +680,13 @@ export async function installPackagedSeed(
     );
   } finally {
     if (transactionCreated) {
-      await removeRuntimeOwnedPath(options.paths.root, transaction).catch(
-        () => undefined,
-      );
+      emitDiagnostic(options, "transaction-cleanup-start");
+      try {
+        await removeRuntimeOwnedPath(options.paths.root, transaction);
+        emitDiagnostic(options, "transaction-cleanup-complete");
+      } catch {
+        emitDiagnostic(options, "transaction-cleanup-failed");
+      }
     }
   }
 }
