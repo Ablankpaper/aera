@@ -109,6 +109,20 @@ function runtimeContractDiagnostic(
   }
 }
 
+/**
+ * The external Windows process observer is diagnostic-only. Keep it enabled
+ * by default so ordinary packaged acceptance still records process evidence,
+ * while allowing one explicitly disabled run to test whether the CIM query
+ * itself changes the launch boundary. Unknown values fail open to preserve
+ * evidence rather than silently weakening an acceptance run.
+ */
+function shouldStartGatewayLaunchObserver(): boolean {
+  return (
+    process.env.AGENTERA_E2E_GATEWAY_OBSERVER?.trim().toLowerCase() !==
+    "disabled"
+  );
+}
+
 async function writeDiagnosticArtifact(
   filename: string,
   content: string,
@@ -1442,17 +1456,23 @@ test("packaged Electron runs its installed locked Runtime and advertises Agent r
     },
   ]);
   runtimeContractDiagnostic("gateway-invoke-start", { timeoutMs: 180_000 });
-  gatewayLaunchObserver = startGatewayLaunchObserver({
-    profilePath: activeGateway.profilePath,
-    pythonExecutable: installed.pythonExecutable.path,
-    privateRoots: [
-      temporaryRoot,
-      userData,
-      hermesHome,
-      installed.versionRoot,
-      desktopRoot,
-    ],
-  });
+  if (shouldStartGatewayLaunchObserver()) {
+    gatewayLaunchObserver = startGatewayLaunchObserver({
+      profilePath: activeGateway.profilePath,
+      pythonExecutable: installed.pythonExecutable.path,
+      privateRoots: [
+        temporaryRoot,
+        userData,
+        hermesHome,
+        installed.versionRoot,
+        desktopRoot,
+      ],
+    });
+  } else if (diagnosticOutput !== null) {
+    runtimeContractDiagnostic("gateway-external-observer-disabled", {
+      reason: "AGENTERA_E2E_GATEWAY_OBSERVER",
+    });
+  }
   const gatewayHeartbeat = setInterval(
     () => runtimeContractDiagnostic("gateway-invoke-heartbeat"),
     10_000,

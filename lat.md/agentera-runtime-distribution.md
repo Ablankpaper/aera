@@ -126,6 +126,8 @@ The managed environment follows [[src/main/hermes.ts#buildGatewayEnv]] while rep
 
 The packaged Electron acceptance adds an external observer in the Playwright process. During Runtime installation it samples only the same Profile's stage files and lock candidates; it does not start a Windows process-table/CIM query while extraction, inventory, or hashing is active. Gateway-launch observation may query the installed Runtime's Python processes through a bounded CIM command and records parent PID, creation identity, executable image, command shape, CPU counters, thread count, and working set independently of the Electron main loop. If installation fails, the failure snapshot may take one bounded final process sample after the install boundary has returned. Failure artifacts include the bounded Profile inventory, known Runtime log tails, and a redacted full readiness stderr capture; the observer is diagnostic-only and never changes the launch deadline, inventory behavior, or ownership decisions.
 
+Packaged acceptance keeps that observer enabled by default. A single explicitly requested `AGENTERA_E2E_GATEWAY_OBSERVER=disabled` diagnostic run may omit the external process-table query and records the omission as evidence; unknown values keep observation enabled.
+
 #### Managed Gateway diagnostic test specifications
 
 Focused Node tests lock the managed invocation contract and the fail-closed evidence boundary used before any new packaged candidate is attempted.

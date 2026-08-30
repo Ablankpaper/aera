@@ -185,6 +185,11 @@ describe("CI workflow policy", () => {
     expect(packagedAcceptanceWorkflow).toContain(
       "$env:AGENTERA_RUNTIME_INVENTORY_DIAGNOSTIC_OUTPUT",
     );
+    expect(packagedAcceptanceWorkflow).toContain(
+      "$env:AGENTERA_E2E_GATEWAY_OBSERVER = $env:GATEWAY_OBSERVER",
+    );
+    expect(packagedAcceptanceWorkflow).toContain("default: enabled");
+    expect(packagedAcceptanceWorkflow).toContain("- disabled");
     expect(packagedAcceptanceWorkflow).not.toContain(
       "$env:AERA_RUNTIME_INVENTORY_DIAGNOSTIC_OUTPUT",
     );
