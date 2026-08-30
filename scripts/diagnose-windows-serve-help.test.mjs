@@ -169,6 +169,21 @@ test("instrumented Gateway phase enables startup markers before exact dispatch",
   assert.match(script, /--profile.*research.*gateway/u);
 });
 
+test("instrumented wrapper keeps profiling on the launch thread", () => {
+  const script = buildGatewayInstrumentationScript({
+    module: "hermes_cli.main",
+    profile: "research",
+  });
+
+  assert.match(script, /sys\.setprofile\(_profile\)/u);
+  assert.doesNotMatch(script, /threading\.setprofile\(_profile\)/u);
+  assert.doesNotMatch(script, /threading\.current_thread\(\)/u);
+  assert.match(
+    script,
+    /if short not in _targets and name not in _targets: return _profile/u,
+  );
+});
+
 test("candidate home mode preserves inherited Windows home variables", () => {
   const env = buildManagedGatewayEnvironment({
     platform: "windows",

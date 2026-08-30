@@ -371,29 +371,29 @@ export function buildGatewayInstrumentationScript({ module, profile }) {
     "discover_mcp_tools",
   ];
   return [
-    "import faulthandler,json,os,runpy,sys,threading,time,traceback",
+    "import faulthandler,json,os,runpy,sys,time,traceback",
     "_marker_path=os.environ.get('AERA_GATEWAY_DIAGNOSTIC_MARKER')",
     "_stack_path=os.environ.get('AERA_GATEWAY_DIAGNOSTIC_STACK')",
     "_marker_file=None",
     "_stack_file=None",
     "_seen=set()",
     "_event_count=0",
-    "_targets=set(" + JSON.stringify(targets) + ")",
-    "_files=('hermes_cli/main.py','hermes_cli/gateway.py','gateway/run.py','gateway/status.py','gateway/code_skew.py','tools/skills_sync.py','hermes_logging.py')",
+    "_targets=frozenset(" + JSON.stringify(targets) + ")",
+    "_files=tuple(('hermes_cli/main.py','hermes_cli/gateway.py','gateway/run.py','gateway/status.py','gateway/code_skew.py','tools/skills_sync.py','hermes_logging.py'))",
+    "_file_suffixes=tuple(part.lower() for part in _files)",
     "def _open_files():\n  global _marker_file,_stack_file\n  try:\n    if _marker_path: _marker_file=open(_marker_path,'a',encoding='utf-8',buffering=1)\n  except Exception: _marker_file=None\n  try:\n    if _stack_path: _stack_file=open(_stack_path,'ab',buffering=0)\n  except Exception: _stack_file=None",
     "def _write(event,**extra):\n  global _event_count\n  if _marker_file is None or _event_count >= 512: return\n  try:\n    payload={'event':event,'elapsedMs':int(time.monotonic()*1000)-_started,**extra}\n    _marker_file.write(json.dumps(payload,default=str,separators=(',',':'))+'\\n')\n    _marker_file.flush()\n    _event_count += 1\n  except Exception: pass",
-    "def _profile(frame,event,arg):\n  if event not in ('call','return'): return _profile\n  name=getattr(frame.f_code,'co_qualname',frame.f_code.co_name)\n  short=frame.f_code.co_name\n  filename=frame.f_code.co_filename.replace('\\\\','/')\n  if short not in _targets and name not in _targets: return _profile\n  if not any(part in filename for part in _files): return _profile\n  key=(event,filename,name,frame.f_lineno)\n  if event == 'return' and key in _seen: return _profile\n  if len(_seen) >= 512: return _profile\n  _seen.add(key)\n  _write('function-'+('enter' if event == 'call' else 'return'),function=name,file=filename.rsplit('/',1)[-1],line=frame.f_lineno,thread=threading.current_thread().name)\n  return _profile",
+    "def _profile(frame,event,arg):\n  if event not in ('call','return'): return _profile\n  code=frame.f_code\n  short=code.co_name\n  name=getattr(code,'co_qualname',short)\n  if short not in _targets and name not in _targets: return _profile\n  filename=code.co_filename\n  if not filename.replace('\\\\','/').lower().endswith(_file_suffixes): return _profile\n  key=(event,filename,name,frame.f_lineno)\n  if event == 'return' and key in _seen: return _profile\n  if len(_seen) >= 512: return _profile\n  _seen.add(key)\n  _write('function-'+('enter' if event == 'call' else 'return'),function=name,file=filename.replace('\\\\','/').rsplit('/',1)[-1],line=frame.f_lineno,thread='main')\n  return _profile",
     "_started=int(time.monotonic()*1000)",
     "_open_files()",
     "_write('wrapper-start',pid=os.getpid(),argv=sys.argv)",
     "if _stack_file is not None:\n  try:\n    faulthandler.enable(file=_stack_file,all_threads=True)\n    faulthandler.dump_traceback_later(10.0,repeat=True,file=_stack_file)\n  except Exception as _fault_error:\n    _write('faulthandler-error',error=repr(_fault_error))",
     "sys.setprofile(_profile)",
-    "threading.setprofile(_profile)",
     "sys.argv=" + JSON.stringify(argv),
     "_write('dispatch-before',module=" + JSON.stringify(module) + ")",
     "try:\n  runpy.run_module(" +
       JSON.stringify(module) +
-      ",run_name='__main__')\nexcept BaseException as _error:\n  _write('dispatch-exception',error=repr(_error),traceback=traceback.format_exc())\n  raise\nfinally:\n  _write('dispatch-after')\n  try: faulthandler.cancel_dump_traceback_later()\n  except Exception: pass\n  try:\n    if _marker_file is not None: _marker_file.close()\n  except Exception: pass\n  try:\n    if _stack_file is not None: _stack_file.close()\n  except Exception: pass",
+      ",run_name='__main__')\nexcept BaseException as _error:\n  _write('dispatch-exception',error=repr(_error),traceback=traceback.format_exc())\n  raise\nfinally:\n  sys.setprofile(None)\n  _write('dispatch-after')\n  try: faulthandler.cancel_dump_traceback_later()\n  except Exception: pass\n  try:\n    if _marker_file is not None: _marker_file.close()\n  except Exception: pass\n  try:\n    if _stack_file is not None: _stack_file.close()\n  except Exception: pass",
   ].join("\n");
 }
 
