@@ -86,6 +86,8 @@ const PROFILE_STAGE_FILES = [
   "logs/gateway.log",
   "logs/errors.log",
   "logs/gateway-exit-diag.log",
+  "logs/gateway-startup-trace.jsonl",
+  "logs/gateway-startup-stack.log",
 ] as const;
 
 function runtimeContractDiagnostic(
@@ -1081,6 +1083,14 @@ async function recordGatewayFailureEvidence(options: {
     {
       name: "gateway-exit-diag",
       path: join(options.profilePath, "logs", "gateway-exit-diag.log"),
+    },
+    {
+      name: "gateway-startup-trace",
+      path: join(options.profilePath, "logs", "gateway-startup-trace.jsonl"),
+    },
+    {
+      name: "gateway-startup-stack",
+      path: join(options.profilePath, "logs", "gateway-startup-stack.log"),
     },
   ];
   const seenLogPaths = new Set<string>();

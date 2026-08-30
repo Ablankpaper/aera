@@ -320,6 +320,7 @@ describe("startGatewayWithReadiness", () => {
     children.length = 0;
     process.env.NODE_ENV = "test";
     delete process.env.AGENTERA_E2E_DIAGNOSTICS;
+    delete process.env.AGENTERA_E2E_GATEWAY_STARTUP_TRACE;
   });
 
   afterEach(() => {
@@ -330,6 +331,7 @@ describe("startGatewayWithReadiness", () => {
     vi.clearAllTimers();
     vi.useRealTimers();
     delete process.env.AGENTERA_E2E_DIAGNOSTICS;
+    delete process.env.AGENTERA_E2E_GATEWAY_STARTUP_TRACE;
     rmSync(TEST_HOME, { recursive: true, force: true });
   });
 
@@ -395,6 +397,33 @@ describe("startGatewayWithReadiness", () => {
           request.authorization === "Bearer generated-internal-token",
       ),
     ).toBe(true);
+  });
+
+  it("uses the Python tracing wrapper only when packaged diagnostics opt in", async () => {
+    process.env.AGENTERA_E2E_GATEWAY_STARTUP_TRACE = "1";
+    spawnNextWithPidFile(4321, 9876);
+    expectListenerAlive();
+    configureGatewayProcessOwnership(TEST_OWNERSHIP_ROOT);
+
+    const result = await startGatewayWithReadiness(undefined, {
+      key: "generated-internal-token",
+      port: 8642,
+    });
+
+    expect(result.ready).toBe(true);
+    const spawnCall = spawnRef.value.mock.calls[0] as [
+      string,
+      string[],
+      { env: Record<string, string> },
+    ];
+    expect(spawnCall[1]?.[0]).toBe("-c");
+    expect(spawnCall[1]?.[1]).toContain("runpy.run_module('hermes_cli.main'");
+    expect(spawnCall[2]?.env.AERA_GATEWAY_STARTUP_TRACE_PATH).toContain(
+      "gateway-startup-trace.jsonl",
+    );
+    expect(spawnCall[2]?.env.AERA_GATEWAY_STARTUP_STACK_PATH).toContain(
+      "gateway-startup-stack.log",
+    );
   });
 
   it("uses the asynchronous process-evidence reader when the synchronous probe is unavailable", async () => {
