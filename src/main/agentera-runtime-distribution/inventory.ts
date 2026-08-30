@@ -365,11 +365,50 @@ export async function verifyRuntimeFileHashes(
     );
   }
   const totalBatchCount = Math.ceil(checks.length / concurrency);
-  for (let offset = 0; offset < checks.length; offset += concurrency) {
-    throwIfAborted(signal);
-    const batch = checks.slice(offset, offset + concurrency);
-    const results = await Promise.allSettled(
-      batch.map(async (check) => {
+  let nextIndex = 0;
+  let completedFileCount = 0;
+  let lastReportedBatchCount = 0;
+  let hasFailure = false;
+  let firstFailure: unknown;
+
+  const reportProgress = (): void => {
+    const equivalentBatchCount = Math.floor(completedFileCount / concurrency);
+    const finalBatch = completedFileCount === checks.length;
+    if (
+      !finalBatch &&
+      equivalentBatchCount <
+        lastReportedBatchCount + RUNTIME_HASH_DIAGNOSTIC_BATCH_INTERVAL
+    ) {
+      return;
+    }
+    const progress = {
+      completedFileCount,
+      totalFileCount: checks.length,
+      completedBatchCount: finalBatch ? totalBatchCount : equivalentBatchCount,
+      totalBatchCount,
+    };
+    lastReportedBatchCount = progress.completedBatchCount;
+    emitHashBatchProgress(observer, progress);
+  };
+
+  const worker = async (): Promise<void> => {
+    while (true) {
+      if (hasFailure) return;
+      let index: number;
+      try {
+        throwIfAborted(signal);
+        index = nextIndex;
+        nextIndex += 1;
+      } catch (error) {
+        if (!hasFailure) {
+          hasFailure = true;
+          firstFailure = error;
+        }
+        return;
+      }
+      if (index >= checks.length) return;
+      const check = checks[index];
+      try {
         if (
           (await fileHasher(check.physicalPath, signal, check.size)) !==
           check.expectedSha256
@@ -378,26 +417,24 @@ export async function verifyRuntimeFileHashes(
             `extracted Runtime hash differs from the manifest: ${check.relativePath}`,
           );
         }
-      }),
-    );
-    const failure = results.find(
-      (result): result is PromiseRejectedResult => result.status === "rejected",
-    );
-    if (failure) throw failure.reason;
-    const progress = {
-      completedFileCount: Math.min(offset + batch.length, checks.length),
-      totalFileCount: checks.length,
-      completedBatchCount: Math.floor(offset / concurrency) + 1,
-      totalBatchCount,
-    };
-    if (
-      progress.completedBatchCount % RUNTIME_HASH_DIAGNOSTIC_BATCH_INTERVAL ===
-        0 ||
-      progress.completedBatchCount === totalBatchCount
-    ) {
-      emitHashBatchProgress(observer, progress);
+      } catch (error) {
+        if (!hasFailure) {
+          hasFailure = true;
+          firstFailure = error;
+        }
+        return;
+      }
+      completedFileCount += 1;
+      reportProgress();
     }
-  }
+  };
+
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, checks.length) }, () =>
+      worker(),
+    ),
+  );
+  if (hasFailure) throw firstFailure;
 }
 
 export function shouldEnforceExtractedRuntimeMode(

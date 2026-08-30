@@ -145,6 +145,43 @@ it("bounds and overlaps final Runtime inventory hashes", async () => {
   expect(maximum).toBe(8);
 });
 
+it("continues dispatching hashes when one worker remains pending", async () => {
+  const { verifyRuntimeFileHashes } =
+    await import("../src/main/agentera-runtime-distribution/extractor");
+  const checks = Array.from({ length: 3 }, (_, index) => ({
+    physicalPath: `/runtime/file-${index}.bin`,
+    relativePath: `file-${index}.bin`,
+    expectedSha256: "a".repeat(64),
+    size: 1,
+  }));
+  const started: number[] = [];
+  let releaseFirst!: () => void;
+  const firstPending = new Promise<void>((resolve) => {
+    releaseFirst = resolve;
+  });
+  const verification = verifyRuntimeFileHashes(
+    checks,
+    undefined,
+    async (path) => {
+      const index = Number(path.match(/file-(\d+)\.bin$/u)?.[1]);
+      started.push(index);
+      if (index === 0) await firstPending;
+      return "a".repeat(64);
+    },
+    2,
+  );
+
+  try {
+    for (let attempt = 0; attempt < 10 && !started.includes(2); attempt += 1) {
+      await Promise.resolve();
+    }
+    expect(started).toContain(2);
+  } finally {
+    releaseFirst();
+  }
+  await expect(verification).resolves.toBeUndefined();
+});
+
 it("bounds hash progress evidence to checkpoints and the final batch", async () => {
   const { verifyRuntimeFileHashes } =
     await import("../src/main/agentera-runtime-distribution/extractor");
