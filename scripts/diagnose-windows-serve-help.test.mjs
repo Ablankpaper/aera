@@ -8,6 +8,7 @@ import {
   buildManagedGatewayConfig,
   buildManagedGatewayEnvironment,
   buildManagedGatewayPhases,
+  buildGatewayInstrumentationScript,
   buildGatewayStacktracePhase,
   canTerminateProcessIdentity,
   cleanupPhaseSandbox,
@@ -124,6 +125,90 @@ test("managed Gateway diagnostic phases stop at the single traced launch", () =>
   assert.match(sync.args.at(-1), /faulthandler\.dump_traceback_later/u);
 });
 
+test("direct normal Gateway phase preserves the packaged command without import tracing", () => {
+  const phases = buildManagedGatewayPhases({
+    module: "hermes_cli.main",
+    launchMode: "direct",
+    python: "C:\\seed\\agentera-runtime\\python\\python.exe",
+    cwd: "C:\\seed\\agentera-runtime\\python\\Lib\\site-packages",
+  });
+
+  assert.deepEqual(
+    phases.map(({ name }) => name),
+    ["gateway-direct"],
+  );
+  assert.deepEqual(phases[0].args, ["-m", "hermes_cli.main", "gateway"]);
+  assert.equal(phases[0].waitForGateway, true);
+  assert.equal(phases[0].instrumented, false);
+  assert.equal(phases[0].diagnosticOnly, false);
+  assert.doesNotMatch(phases[0].args.join(" "), /importtime/u);
+});
+
+test("instrumented Gateway phase enables startup markers before exact dispatch", () => {
+  const phases = buildManagedGatewayPhases({
+    module: "hermes_cli.main",
+    launchMode: "instrumented",
+    profile: "research",
+    python: "C:\\seed\\agentera-runtime\\python\\python.exe",
+    cwd: "C:\\seed\\agentera-runtime\\python\\Lib\\site-packages",
+  });
+
+  assert.deepEqual(
+    phases.map(({ name }) => name),
+    ["gateway-instrumented"],
+  );
+  assert.equal(phases[0].waitForGateway, true);
+  assert.equal(phases[0].instrumented, true);
+  assert.equal(phases[0].diagnosticOnly, true);
+  const script = phases[0].args.at(-1);
+  assert.match(script, /faulthandler\.enable/u);
+  assert.match(script, /dump_traceback_later/u);
+  assert.match(script, /AERA_GATEWAY_DIAGNOSTIC_MARKER/u);
+  assert.match(script, /sys\.setprofile/u);
+  assert.match(script, /runpy\.run_module\("hermes_cli\.main"/u);
+  assert.match(script, /--profile.*research.*gateway/u);
+});
+
+test("candidate home mode preserves inherited Windows home variables", () => {
+  const env = buildManagedGatewayEnvironment({
+    platform: "windows",
+    python: "C:\\seed\\agentera-runtime\\python\\python.exe",
+    hermesHome: "C:\\run\\hermes-home",
+    fakeHome: "C:\\run\\disposable-home",
+    homeMode: "candidate",
+    apiServerKey: "diagnostic-key-only",
+    apiServerPort: 18642,
+    baseEnv: {
+      PATH: "C:\\Windows\\System32",
+      HOME: "C:\\Users\\runner",
+      USERPROFILE: "C:\\Users\\runner",
+      APPDATA: "C:\\Users\\runner\\AppData\\Roaming",
+      LOCALAPPDATA: "C:\\Users\\runner\\AppData\\Local",
+      CI: "true",
+    },
+    envMode: "desktop",
+  });
+
+  assert.equal(env.HOME, "C:\\Users\\runner");
+  assert.equal(env.USERPROFILE, "C:\\Users\\runner");
+  assert.equal(env.APPDATA, "C:\\Users\\runner\\AppData\\Roaming");
+  assert.equal(env.LOCALAPPDATA, "C:\\Users\\runner\\AppData\\Local");
+  assert.equal(env.HERMES_HOME, "C:\\run\\hermes-home");
+  assert.notEqual(env.HOME, "C:\\run\\disposable-home");
+});
+
+test("instrumentation script helper uses environment-owned evidence paths", () => {
+  const script = buildGatewayInstrumentationScript({
+    module: "hermes_cli.main",
+    profile: "research",
+  });
+  assert.match(script, /AERA_GATEWAY_DIAGNOSTIC_MARKER/u);
+  assert.match(script, /AERA_GATEWAY_DIAGNOSTIC_STACK/u);
+  assert.match(script, /function-/u);
+  assert.match(script, /GatewayRunner/u);
+  assert.match(script, /write_pid_file/u);
+});
+
 test("named Profile Gateway phases put --profile before the gateway command", () => {
   const phases = buildManagedGatewayPhases({
     module: "hermes_cli.main",
@@ -206,6 +291,22 @@ test("diagnostic control flow stops at the first failure and only traces a readi
       outcome: "timeout-killed",
     }),
     { action: "stop", reason: "stacktrace-complete" },
+  );
+  assert.deepEqual(
+    nextDiagnosticPhase({
+      phase: "gateway-direct",
+      outcome: "readiness-timeout-cleaned",
+      ready: false,
+    }),
+    { action: "append", phase: "gateway-stacktrace" },
+  );
+  assert.deepEqual(
+    nextDiagnosticPhase({
+      phase: "gateway-instrumented",
+      outcome: "readiness-timeout-cleaned",
+      ready: false,
+    }),
+    { action: "stop", reason: "instrumented-complete" },
   );
 });
 
@@ -694,6 +795,10 @@ test("phase summary retains wrapper, listener, pid-file, importtime, faulthandle
     faulthandlerTail: "Thread 0x00000001 (most recent call first)",
     cleanup: { remainingPids: [] },
     sandboxCleanup: { attempted: true, cleaned: true },
+    stageMarkerBytes: 42,
+    stageMarkerTail: '{"event":"function-enter"}',
+    stacktraceBytes: 84,
+    stacktraceTail: "Thread 0x00000001",
   });
 
   assert.equal(summary.phase.name, "gateway-importtime");
@@ -705,6 +810,10 @@ test("phase summary retains wrapper, listener, pid-file, importtime, faulthandle
   assert.equal(summary.ready, false);
   assert.match(summary.importtimeTail, /hermes_cli\.main/u);
   assert.match(summary.faulthandlerTail, /most recent call first/u);
+  assert.equal(summary.stageMarkerBytes, 42);
+  assert.match(summary.stageMarkerTail, /function-enter/u);
+  assert.equal(summary.stacktraceBytes, 84);
+  assert.match(summary.stacktraceTail, /Thread/u);
   assert.deepEqual(summary.cleanup.remainingPids, []);
   assert.equal(summary.sandboxCleanup.cleaned, true);
 

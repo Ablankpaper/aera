@@ -16,7 +16,8 @@
  * Usage:
  *   node scripts/diagnose-windows-serve-help.mjs \
  *     --runtime-root <extracted seed dir> --manifest <manifest.json> \
- *     [--timeout-ms 150000] [--output <path>]
+ *     [--launch-mode traced|direct|instrumented] \
+ *     [--home-mode fake|candidate] [--timeout-ms 150000] [--output <path>]
  */
 
 import { randomBytes } from "node:crypto";
@@ -66,6 +67,70 @@ function isWindowsPlatform(platform) {
 
 function pathApiForPlatform(platform) {
   return isWindowsPlatform(platform) ? path.win32 : path.posix;
+}
+
+function buildDesktopEnhancedPath({
+  platform,
+  python,
+  hermesHome,
+  home,
+  baseEnv,
+}) {
+  const windows = isWindowsPlatform(platform);
+  const pathApi = pathApiForPlatform(platform);
+  const existing = readCaseInsensitiveEnv(baseEnv, "PATH") ?? "";
+  const homeRoot = home || "";
+  const candidates = windows
+    ? [
+        pathApi.join(hermesHome, "git", "bin"),
+        pathApi.join(hermesHome, "git", "cmd"),
+        pathApi.join(hermesHome, "git", "usr", "bin"),
+        pathApi.join(hermesHome, "node"),
+        pathApi.join(hermesHome, "hermes-agent", "venv", "Scripts"),
+        readCaseInsensitiveEnv(baseEnv, "NVM_SYMLINK"),
+        readCaseInsensitiveEnv(baseEnv, "APPDATA")
+          ? pathApi.join(readCaseInsensitiveEnv(baseEnv, "APPDATA"), "npm")
+          : undefined,
+        readCaseInsensitiveEnv(baseEnv, "ProgramFiles")
+          ? pathApi.join(
+              readCaseInsensitiveEnv(baseEnv, "ProgramFiles"),
+              "nodejs",
+            )
+          : undefined,
+        readCaseInsensitiveEnv(baseEnv, "ProgramFiles(x86)")
+          ? pathApi.join(
+              readCaseInsensitiveEnv(baseEnv, "ProgramFiles(x86)"),
+              "nodejs",
+            )
+          : undefined,
+        readCaseInsensitiveEnv(baseEnv, "ProgramFiles")
+          ? pathApi.join(
+              readCaseInsensitiveEnv(baseEnv, "ProgramFiles"),
+              "Git",
+              "cmd",
+            )
+          : undefined,
+        readCaseInsensitiveEnv(baseEnv, "LOCALAPPDATA")
+          ? pathApi.join(
+              readCaseInsensitiveEnv(baseEnv, "LOCALAPPDATA"),
+              "Programs",
+              "Git",
+              "cmd",
+            )
+          : undefined,
+        homeRoot ? pathApi.join(homeRoot, ".local", "bin") : undefined,
+        homeRoot ? pathApi.join(homeRoot, ".cargo", "bin") : undefined,
+      ]
+    : [
+        homeRoot ? pathApi.join(homeRoot, ".local", "bin") : undefined,
+        homeRoot ? pathApi.join(homeRoot, ".cargo", "bin") : undefined,
+        pathApi.join(hermesHome, "hermes-agent", "venv", "bin"),
+        homeRoot ? pathApi.join(homeRoot, ".volta", "bin") : undefined,
+        homeRoot ? pathApi.join(homeRoot, ".asdf", "shims") : undefined,
+      ];
+  return [...new Set([pathApi.dirname(python), ...candidates, existing])]
+    .filter(Boolean)
+    .join(windows ? ";" : ":");
 }
 
 function readCaseInsensitiveEnv(baseEnv, name) {
@@ -118,20 +183,33 @@ export function buildManagedGatewayEnvironment({
   python,
   hermesHome,
   fakeHome,
+  homeMode = "fake",
   apiServerKey,
   apiServerPort,
   baseEnv = process.env,
   envMode = "minimal",
 }) {
+  if (!new Set(["fake", "candidate"]).has(homeMode)) {
+    throw new Error("--home-mode must be fake or candidate");
+  }
   const windows = isWindowsPlatform(platform);
   const pathApi = pathApiForPlatform(platform);
   const delimiter = windows ? ";" : ":";
 
   const systemPath = readCaseInsensitiveEnv(baseEnv, "PATH") ?? "";
   const pythonDirectory = pathApi.dirname(python);
-  const managedPath = [pythonDirectory, systemPath]
-    .filter(Boolean)
-    .join(delimiter);
+  const inheritedHome = readCaseInsensitiveEnv(baseEnv, "HOME");
+  const managedPath =
+    envMode === "desktop"
+      ? buildDesktopEnhancedPath({
+          platform,
+          python,
+          hermesHome,
+          home:
+            homeMode === "candidate" ? (inheritedHome ?? fakeHome) : fakeHome,
+          baseEnv,
+        })
+      : [pythonDirectory, systemPath].filter(Boolean).join(delimiter);
 
   if (envMode === "desktop") {
     // Reproduce hermes.ts buildGatewayEnv(): the managed Desktop spawn
@@ -141,7 +219,6 @@ export function buildManagedGatewayEnvironment({
     const environment = { ...baseEnv };
     Object.assign(environment, {
       PATH: managedPath,
-      HOME: fakeHome,
       HERMES_HOME: hermesHome,
       API_SERVER_ENABLED: "true",
       API_SERVER_PORT: String(positivePort(apiServerPort)),
@@ -149,6 +226,17 @@ export function buildManagedGatewayEnvironment({
       PYTHONNOUSERSITE: "1",
       PYTHONDONTWRITEBYTECODE: "1",
     });
+    if (homeMode === "fake") {
+      environment.HOME = fakeHome;
+    } else {
+      // The packaged Desktop launch inherits the machine user's home and
+      // AppData roots. Preserve those values while still isolating
+      // HERMES_HOME so this diagnostic cannot touch the user's Runtime data.
+      for (const name of ["HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA"]) {
+        const inherited = readCaseInsensitiveEnv(baseEnv, name);
+        if (inherited !== undefined) environment[name] = inherited;
+      }
+    }
     return environment;
   }
 
@@ -171,10 +259,6 @@ export function buildManagedGatewayEnvironment({
     .join(delimiter);
 
   Object.assign(environment, {
-    HOME: fakeHome,
-    USERPROFILE: fakeHome,
-    APPDATA: pathApi.join(fakeHome, "AppData", "Roaming"),
-    LOCALAPPDATA: pathApi.join(fakeHome, "AppData", "Local"),
     HERMES_HOME: hermesHome,
     API_SERVER_ENABLED: "true",
     API_SERVER_PORT: String(positivePort(apiServerPort)),
@@ -182,6 +266,19 @@ export function buildManagedGatewayEnvironment({
     PYTHONNOUSERSITE: "1",
     PYTHONDONTWRITEBYTECODE: "1",
   });
+  if (homeMode === "fake") {
+    Object.assign(environment, {
+      HOME: fakeHome,
+      USERPROFILE: fakeHome,
+      APPDATA: pathApi.join(fakeHome, "AppData", "Roaming"),
+      LOCALAPPDATA: pathApi.join(fakeHome, "AppData", "Local"),
+    });
+  } else {
+    for (const name of ["HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA"]) {
+      const inherited = readCaseInsensitiveEnv(baseEnv, name);
+      if (inherited !== undefined) environment[name] = inherited;
+    }
+  }
 
   // Keep this explicit even though the object starts empty. It protects a
   // future caller that passes a pre-built object into this helper.
@@ -242,12 +339,106 @@ function syncBundledSkillsScript(moduleName, profile) {
 }
 
 /**
+ * Build a diagnostic-only Python wrapper that starts the exact managed CLI
+ * command while recording the first startup functions it enters and periodic
+ * faulthandler stacks. Evidence paths are supplied through the child
+ * environment so they never become command-line secrets or path-bearing
+ * arguments in the emitted diagnostic record.
+ */
+export function buildGatewayInstrumentationScript({ module, profile }) {
+  const profileArgs = profileCommandArgs(profile);
+  const argv = ["aera-managed-gateway-diagnostic", ...profileArgs, "gateway"];
+  const targets = [
+    "cmd_gateway",
+    "gateway_command",
+    "_gateway_command_inner",
+    "run_gateway",
+    "start_gateway",
+    "sync_skills",
+    "_sync_bundled_skills_quietly",
+    "_sync_bundled_skills_for_startup",
+    "record_boot_fingerprint",
+    "record_start_and_check_storm",
+    "GatewayRunner",
+    "GatewayRunner.__init__",
+    "setup_logging",
+    "acquire_gateway_runtime_lock",
+    "write_pid_file",
+    "_guard_existing_gateway_process_conflict",
+    "_guard_named_profile_under_multiplexer",
+    "_guard_supervised_gateway_conflict",
+    "_ensure_windows_gateway_venv_imports",
+    "discover_mcp_tools",
+  ];
+  return [
+    "import faulthandler,json,os,runpy,sys,threading,time,traceback",
+    "_marker_path=os.environ.get('AERA_GATEWAY_DIAGNOSTIC_MARKER')",
+    "_stack_path=os.environ.get('AERA_GATEWAY_DIAGNOSTIC_STACK')",
+    "_marker_file=None",
+    "_stack_file=None",
+    "_seen=set()",
+    "_event_count=0",
+    "_targets=set(" + JSON.stringify(targets) + ")",
+    "_files=('hermes_cli/main.py','hermes_cli/gateway.py','gateway/run.py','gateway/status.py','gateway/code_skew.py','tools/skills_sync.py','hermes_logging.py')",
+    "def _open_files():\n  global _marker_file,_stack_file\n  try:\n    if _marker_path: _marker_file=open(_marker_path,'a',encoding='utf-8',buffering=1)\n  except Exception: _marker_file=None\n  try:\n    if _stack_path: _stack_file=open(_stack_path,'ab',buffering=0)\n  except Exception: _stack_file=None",
+    "def _write(event,**extra):\n  global _event_count\n  if _marker_file is None or _event_count >= 512: return\n  try:\n    payload={'event':event,'elapsedMs':int(time.monotonic()*1000)-_started,**extra}\n    _marker_file.write(json.dumps(payload,default=str,separators=(',',':'))+'\\n')\n    _marker_file.flush()\n    _event_count += 1\n  except Exception: pass",
+    "def _profile(frame,event,arg):\n  if event not in ('call','return'): return _profile\n  name=getattr(frame.f_code,'co_qualname',frame.f_code.co_name)\n  short=frame.f_code.co_name\n  filename=frame.f_code.co_filename.replace('\\\\','/')\n  if short not in _targets and name not in _targets: return _profile\n  if not any(part in filename for part in _files): return _profile\n  key=(event,filename,name,frame.f_lineno)\n  if event == 'return' and key in _seen: return _profile\n  if len(_seen) >= 512: return _profile\n  _seen.add(key)\n  _write('function-'+('enter' if event == 'call' else 'return'),function=name,file=filename.rsplit('/',1)[-1],line=frame.f_lineno,thread=threading.current_thread().name)\n  return _profile",
+    "_started=int(time.monotonic()*1000)",
+    "_open_files()",
+    "_write('wrapper-start',pid=os.getpid(),argv=sys.argv)",
+    "if _stack_file is not None:\n  try:\n    faulthandler.enable(file=_stack_file,all_threads=True)\n    faulthandler.dump_traceback_later(10.0,repeat=True,file=_stack_file)\n  except Exception as _fault_error:\n    _write('faulthandler-error',error=repr(_fault_error))",
+    "sys.setprofile(_profile)",
+    "threading.setprofile(_profile)",
+    "sys.argv=" + JSON.stringify(argv),
+    "_write('dispatch-before',module=" + JSON.stringify(module) + ")",
+    "try:\n  runpy.run_module(" +
+      JSON.stringify(module) +
+      ",run_name='__main__')\nexcept BaseException as _error:\n  _write('dispatch-exception',error=repr(_error),traceback=traceback.format_exc())\n  raise\nfinally:\n  _write('dispatch-after')\n  try: faulthandler.cancel_dump_traceback_later()\n  except Exception: pass\n  try:\n    if _marker_file is not None: _marker_file.close()\n  except Exception: pass\n  try:\n    if _stack_file is not None: _stack_file.close()\n  except Exception: pass",
+  ].join("\n");
+}
+
+/**
  * Return the phase boundaries used by the managed Gateway diagnostic. These
  * six phases are the normal chain; the stack-trace phase is constructed
  * separately and appended only after the traced Gateway launch times out.
  */
-export function buildManagedGatewayPhases({ module, profile, python, cwd }) {
+export function buildManagedGatewayPhases({
+  module,
+  profile,
+  python,
+  cwd,
+  launchMode = "traced",
+}) {
   const profileArgs = profileCommandArgs(profile);
+  if (launchMode === "direct") {
+    return [
+      {
+        name: "gateway-direct",
+        file: python,
+        cwd,
+        args: ["-m", module, ...profileArgs, "gateway"],
+        waitForGateway: true,
+        instrumented: false,
+        diagnosticOnly: false,
+      },
+    ];
+  }
+  if (launchMode === "instrumented") {
+    return [
+      {
+        name: "gateway-instrumented",
+        file: python,
+        cwd,
+        args: ["-c", buildGatewayInstrumentationScript({ module, profile })],
+        waitForGateway: true,
+        instrumented: true,
+        diagnosticOnly: true,
+      },
+    ];
+  }
+  if (launchMode !== "traced") {
+    throw new Error("launchMode must be traced, direct, or instrumented");
+  }
   return [
     {
       name: "managed-version",
@@ -605,9 +796,16 @@ export function nextDiagnosticPhase({
   ready = false,
   exitCode,
 }) {
-  if (phase === "gateway-importtime") {
+  if (
+    phase === "gateway-importtime" ||
+    phase === "gateway-direct" ||
+    phase === "gateway-instrumented"
+  ) {
     if (ready || outcome === "ready-cleaned") {
       return { action: "stop", reason: "gateway-ready" };
+    }
+    if (phase === "gateway-instrumented") {
+      return { action: "stop", reason: "instrumented-complete" };
     }
     if (
       outcome === "readiness-timeout-cleaned" ||
@@ -761,6 +959,20 @@ function appendBoundedTail(current, chunk) {
   return next.length > DIAGNOSTIC_TAIL_BYTES
     ? next.subarray(next.length - DIAGNOSTIC_TAIL_BYTES)
     : next;
+}
+
+function readBoundedFileTail(filePath) {
+  if (!filePath) return { bytes: 0, tail: "" };
+  try {
+    const raw = readFileSync(filePath);
+    const bounded =
+      raw.length > DIAGNOSTIC_TAIL_BYTES
+        ? raw.subarray(raw.length - DIAGNOSTIC_TAIL_BYTES)
+        : raw;
+    return { bytes: raw.length, tail: bounded.toString("utf8") };
+  } catch {
+    return { bytes: 0, tail: "" };
+  }
 }
 
 function processIsAlive(pid) {
@@ -1694,6 +1906,8 @@ export function runChildToExit({
           : (closeResult?.outcome ?? "exited");
         const result = {
           phase: phase.name,
+          instrumented: phase.instrumented === true,
+          diagnosticOnly: phase.diagnosticOnly === true,
           pid,
           elapsedMs: nowFn() - startedAt,
           stdoutBytes,
@@ -1713,9 +1927,13 @@ export function runChildToExit({
             ? stderrTail.toString("utf8")
             : null,
           faulthandlerTail:
-            phase.name === "gateway-stacktrace"
+            phase.name === "gateway-stacktrace" || phase.instrumented === true
               ? stderrTail.toString("utf8")
               : null,
+          stageMarkerBytes: 0,
+          stageMarkerTail: "",
+          stacktraceBytes: 0,
+          stacktraceTail: "",
           cleanup,
           ...extra,
         };
@@ -1866,6 +2084,8 @@ export async function runGatewayPhase({
   nowFn = Date.now,
   stdioMode = "pipe",
   stderrLogPath = null,
+  stageMarkerPath = null,
+  stacktracePath = null,
 }) {
   const startedAt = nowFn();
   let pidFileBefore;
@@ -2075,6 +2295,17 @@ export async function runGatewayPhase({
       // Keep the pipe-era zeros when the log is unreadable.
     }
   }
+  const stageEvidence = readBoundedFileTail(stageMarkerPath);
+  const stacktraceEvidence = readBoundedFileTail(stacktracePath);
+  if (stageMarkerPath || stacktracePath) {
+    emit("gateway-stage-evidence", {
+      phase: phase.name,
+      stageMarkerBytes: stageEvidence.bytes,
+      stageMarkerTail: stageEvidence.tail,
+      stacktraceBytes: stacktraceEvidence.bytes,
+      stacktraceTail: stacktraceEvidence.tail,
+    });
+  }
   const outcome = serving.ready
     ? "ready-cleaned"
     : serving.outcome === "child-exited"
@@ -2088,6 +2319,8 @@ export async function runGatewayPhase({
           : serving.outcome;
   return {
     phase: phase.name,
+    instrumented: phase.instrumented === true,
+    diagnosticOnly: phase.diagnosticOnly === true,
     pid,
     elapsedMs: nowFn() - startedAt,
     outcome,
@@ -2130,7 +2363,13 @@ export async function runGatewayPhase({
       ? stderrTail.toString("utf8")
       : null,
     faulthandlerTail:
-      phase.name === "gateway-stacktrace" ? stderrTail.toString("utf8") : null,
+      phase.name === "gateway-stacktrace" || phase.instrumented === true
+        ? stacktraceEvidence.tail || stderrTail.toString("utf8")
+        : null,
+    stageMarkerBytes: stageEvidence.bytes,
+    stageMarkerTail: stageEvidence.tail,
+    stacktraceBytes: stacktraceEvidence.bytes,
+    stacktraceTail: stacktraceEvidence.tail,
     cleanup,
   };
 }
@@ -2139,6 +2378,8 @@ export async function runGatewayPhase({
 export function summarizeDiagnosticPhase(result) {
   return {
     phase: result?.phase ?? null,
+    instrumented: result?.instrumented === true,
+    diagnosticOnly: result?.diagnosticOnly === true,
     outcome: result?.outcome ?? null,
     elapsedMs: result?.elapsedMs ?? null,
     pid: result?.pid ?? null,
@@ -2169,6 +2410,10 @@ export function summarizeDiagnosticPhase(result) {
     pidFileTransitions: result?.pidFileTransitions ?? [],
     importtimeTail: result?.importtimeTail ?? null,
     faulthandlerTail: result?.faulthandlerTail ?? null,
+    stageMarkerBytes: result?.stageMarkerBytes ?? 0,
+    stageMarkerTail: result?.stageMarkerTail ?? "",
+    stacktraceBytes: result?.stacktraceBytes ?? 0,
+    stacktraceTail: result?.stacktraceTail ?? "",
     cleanup: result?.cleanup ?? null,
     sandboxCleanup: result?.sandboxCleanup ?? null,
   };
@@ -2181,7 +2426,7 @@ function parseArgs(argv) {
     const value = argv[index + 1];
     if (!flag?.startsWith("--") || value === undefined) {
       throw new Error(
-        "usage: diagnose-windows-serve-help.mjs --runtime-root <dir> --manifest <file> [--timeout-ms N] [--output file]",
+        "usage: diagnose-windows-serve-help.mjs --runtime-root <dir> --manifest <file> [--launch-mode traced|direct|instrumented] [--home-mode fake|candidate] [--timeout-ms N] [--output file]",
       );
     }
     values[flag.slice(2).replaceAll("-", "_")] = value;
@@ -2202,6 +2447,14 @@ function parseArgs(argv) {
   if (!["pipe", "file"].includes(stdioMode)) {
     throw new Error("--stdio-mode must be pipe or file");
   }
+  const launchMode = values.launch_mode ?? "traced";
+  if (!["traced", "direct", "instrumented"].includes(launchMode)) {
+    throw new Error("--launch-mode must be traced, direct, or instrumented");
+  }
+  const homeMode = values.home_mode ?? "fake";
+  if (!["fake", "candidate"].includes(homeMode)) {
+    throw new Error("--home-mode must be fake or candidate");
+  }
   return {
     runtimeRoot: values.runtime_root,
     manifestPath: values.manifest,
@@ -2210,6 +2463,8 @@ function parseArgs(argv) {
     output: values.output ?? null,
     envMode,
     stdioMode,
+    launchMode,
+    homeMode,
   };
 }
 
@@ -2275,6 +2530,7 @@ async function main() {
     profile: options.profile,
     python,
     cwd,
+    launchMode: options.launchMode,
   });
   const stacktracePhase = buildGatewayStacktracePhase({
     module: manifest.entrypoints.module,
@@ -2293,14 +2549,16 @@ async function main() {
     runnerArch: process.arch,
     node: process.version,
     timeoutMs: options.timeoutMs,
-    phases: 6,
-    stacktraceOnReadinessTimeout: true,
+    phases: phases.length,
+    launchMode: options.launchMode,
+    homeMode: options.homeMode,
+    stacktraceOnReadinessTimeout: options.launchMode !== "instrumented",
     envMode: options.envMode,
     stdioMode: options.stdioMode,
   });
 
   const results = [];
-  const queue = phases.slice(0, 6);
+  const queue = phases.slice();
   let stacktraceAdded = false;
   let stopReason = null;
   for (let index = 0; index < queue.length; index += 1) {
@@ -2322,6 +2580,12 @@ async function main() {
     mkdirSync(hermesHome, { recursive: true });
     const pidPath = pathApi.join(hermesHome, "gateway.pid");
     const stderrLogPath = pathApi.join(phaseRoot, "gateway-stderr.log");
+    const stageMarkerPath = phase.instrumented
+      ? pathApi.join(phaseRoot, "gateway-stage-markers.jsonl")
+      : null;
+    const stacktracePath = phase.instrumented
+      ? pathApi.join(phaseRoot, "gateway-faulthandler.log")
+      : null;
     const apiServerKey = `aera-diagnostic-${randomBytes(18).toString("hex")}`;
     secrets.push(apiServerKey);
     const apiServerPort = await reserveLoopbackPort();
@@ -2346,7 +2610,15 @@ async function main() {
       apiServerPort,
       baseEnv: process.env,
       envMode: options.envMode,
+      homeMode: options.homeMode,
     });
+    if (phase.instrumented) {
+      env.AERA_GATEWAY_DIAGNOSTIC_MARKER = stageMarkerPath;
+      env.AERA_GATEWAY_DIAGNOSTIC_STACK = stacktracePath;
+      // The wrapper also enables faulthandler itself; this flag makes the
+      // child behavior explicit in the emitted environment contract.
+      env.PYTHONFAULTHANDLER = "1";
+    }
     emit("phase-start", {
       phase: phase.name,
       profile: options.profile ?? "default",
@@ -2354,6 +2626,9 @@ async function main() {
       pidFile: pidPath,
       port: apiServerPort,
       configMaterialized: true,
+      launchMode: options.launchMode,
+      homeMode: options.homeMode,
+      instrumented: phase.instrumented === true,
       envMode: options.envMode,
       stdioMode: options.stdioMode,
     });
@@ -2370,6 +2645,8 @@ async function main() {
           python,
           stdioMode: options.stdioMode,
           stderrLogPath,
+          stageMarkerPath,
+          stacktracePath,
         })
       : await runChildToExit({
           phase,

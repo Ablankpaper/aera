@@ -149,6 +149,42 @@ describe("CI workflow policy", () => {
       ),
     ).toBe(true);
 
+    const managedGatewayRuns = (managedGateway?.steps ?? [])
+      .filter((step) => typeof step.run === "string")
+      .map((step) => step.run as string);
+    expect(
+      managedGatewayRuns.some(
+        (run) =>
+          run.includes("--launch-mode direct") &&
+          run.includes("--home-mode candidate") &&
+          run.includes("direct-candidate-home-diagnostic.jsonl"),
+      ),
+    ).toBe(true);
+    expect(
+      managedGatewayRuns.some(
+        (run) =>
+          run.includes("--launch-mode direct") &&
+          run.includes("--home-mode fake") &&
+          run.includes("direct-fake-home-diagnostic.jsonl"),
+      ),
+    ).toBe(true);
+    expect(
+      managedGatewayRuns.some(
+        (run) =>
+          run.includes("--launch-mode instrumented") &&
+          run.includes("--home-mode candidate") &&
+          run.includes("instrumented-candidate-home-diagnostic.jsonl"),
+      ),
+    ).toBe(true);
+    const managedGatewayJson = JSON.stringify(managedGateway?.steps ?? []);
+    expect(managedGatewayJson).toContain(
+      "direct-candidate-home-diagnostic.jsonl",
+    );
+    expect(managedGatewayJson).toContain("direct-fake-home-diagnostic.jsonl");
+    expect(managedGatewayJson).toContain(
+      "instrumented-candidate-home-diagnostic.jsonl",
+    );
+
     const runtimeHealth = workflow.jobs?.["windows-runtime-health-diagnostic"];
     expect(runtimeHealth).toMatchObject({
       if: "github.event_name == 'workflow_dispatch' && inputs.mode == 'windows-runtime-health-diagnostic'",

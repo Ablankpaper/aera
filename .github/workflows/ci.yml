@@ -272,19 +272,67 @@ jobs:
           "SEED_EXTRACT_ROOT=$dest" >> $env:GITHUB_ENV
           "SEED_MANIFEST=$($manifest.FullName)" >> $env:GITHUB_ENV
 
+      # Keep the exact, untraced Gateway command separate from the import-time
+      # chain above. Candidate Windows launches inherit the runner user's HOME
+      # while routing HERMES_HOME to the temporary Profile; this comparison
+      # isolates that boundary without changing the production command.
+      - name: Diagnose direct Gateway with candidate home
+        continue-on-error: true
+        run: >-
+          node scripts/diagnose-windows-serve-help.mjs
+          --runtime-root "$env:SEED_EXTRACT_ROOT"
+          --manifest "$env:SEED_MANIFEST"
+          --launch-mode direct
+          --home-mode candidate
+          --env-mode desktop
+          --stdio-mode file
+          --output "$env:RUNNER_TEMP/direct-candidate-home-diagnostic.jsonl"
+
+      # A disposable HOME is the control for the candidate-home run. Both
+      # commands remain direct normal launches; only the home boundary differs.
+      - name: Diagnose direct Gateway with isolated home
+        continue-on-error: true
+        run: >-
+          node scripts/diagnose-windows-serve-help.mjs
+          --runtime-root "$env:SEED_EXTRACT_ROOT"
+          --manifest "$env:SEED_MANIFEST"
+          --launch-mode direct
+          --home-mode fake
+          --env-mode desktop
+          --stdio-mode file
+          --output "$env:RUNNER_TEMP/direct-fake-home-diagnostic.jsonl"
+
+      # The instrumented wrapper enables faulthandler at process start and
+      # records bounded function-entry markers. It is diagnostic-only; the
+      # direct runs above remain the evidence for the unmodified dispatch.
+      - name: Diagnose instrumented Gateway with candidate home
+        continue-on-error: true
+        run: >-
+          node scripts/diagnose-windows-serve-help.mjs
+          --runtime-root "$env:SEED_EXTRACT_ROOT"
+          --manifest "$env:SEED_MANIFEST"
+          --launch-mode instrumented
+          --home-mode candidate
+          --env-mode desktop
+          --stdio-mode file
+          --output "$env:RUNNER_TEMP/instrumented-candidate-home-diagnostic.jsonl"
+
+      # Controlled comparison against the packaged Desktop boundary: the
+      # failing managed spawn spreads the parent environment and routes
+      # stderr through an inherited file handle. Reproduce exactly those two
+      # dimensions on the same seed so a hang localises to env, stdio, or the
+      # Electron parent-process boundary. These traced phases run after the
+      # cold direct comparisons and are retained for historical comparison.
       - name: Diagnose the managed Gateway launch path
+        continue-on-error: true
         run: >-
           node scripts/diagnose-windows-serve-help.mjs
           --runtime-root "$env:SEED_EXTRACT_ROOT"
           --manifest "$env:SEED_MANIFEST"
           --output "$env:RUNNER_TEMP/managed-gateway-diagnostic.jsonl"
 
-      # Controlled comparison against the packaged Desktop boundary: the
-      # failing managed spawn spreads the parent environment and routes
-      # stderr through an inherited file handle. Reproduce exactly those two
-      # dimensions on the same seed so a hang localises to env, stdio, or the
-      # Electron parent-process boundary.
       - name: Diagnose the Desktop-equivalent env and stdio boundary
+        continue-on-error: true
         run: >-
           node scripts/diagnose-windows-serve-help.mjs
           --runtime-root "$env:SEED_EXTRACT_ROOT"
@@ -301,6 +349,9 @@ jobs:
           path: |
             ${{ runner.temp }}/managed-gateway-diagnostic.jsonl
             ${{ runner.temp }}/controlled-gateway-diagnostic.jsonl
+            ${{ runner.temp }}/direct-candidate-home-diagnostic.jsonl
+            ${{ runner.temp }}/direct-fake-home-diagnostic.jsonl
+            ${{ runner.temp }}/instrumented-candidate-home-diagnostic.jsonl
           if-no-files-found: warn
           retention-days: 14
 
