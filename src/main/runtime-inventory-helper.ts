@@ -12,6 +12,7 @@ import {
   parseRuntimeManifest,
   type RuntimeManifest,
 } from "./agentera-runtime-distribution/manifest";
+import { runtimeInventoryDiagnosticErrorFields } from "./runtime-inventory-diagnostic";
 
 const MAX_REQUEST_BYTES = 32 * 1024 * 1024;
 const DIAGNOSTIC_OUTPUT = "AGENTERA_RUNTIME_INVENTORY_DIAGNOSTIC_OUTPUT";
@@ -28,6 +29,8 @@ const EXPECTED_REQUEST_FIELDS = new Set([
   "maxExtractedBytes",
   "hostPlatform",
 ]);
+
+let diagnosticLastInventoryEvent: string | null = null;
 
 interface RuntimeInventoryHelperRequest {
   schemaVersion: 1;
@@ -138,6 +141,7 @@ function parseRequest(value: unknown): RuntimeInventoryHelperRequest {
 }
 
 async function main(): Promise<void> {
+  diagnosticLastInventoryEvent = null;
   helperDiagnostic("inventory-helper-main-start");
   if (
     process.env.AGENTERA_RUNTIME_INVENTORY_HELPER !== "1" ||
@@ -161,8 +165,10 @@ async function main(): Promise<void> {
   helperDiagnostic("inventory-walk-hash-start");
   const startedAt = Date.now();
   const diagnosticObserver = diagnosticOutputPath()
-    ? ({ event, ...fields }: RuntimeInventoryDiagnosticEvent) =>
-        helperDiagnostic(event, fields)
+    ? ({ event, ...fields }: RuntimeInventoryDiagnosticEvent) => {
+        diagnosticLastInventoryEvent = event;
+        helperDiagnostic(event, fields);
+      }
     : undefined;
   const hashConcurrency = diagnosticHashConcurrency();
   const hashFileObserver = diagnosticHashFileObserver(
@@ -190,8 +196,11 @@ async function main(): Promise<void> {
   helperDiagnostic("inventory-helper-result-written");
 }
 
-void main().catch(() => {
-  helperDiagnostic("inventory-helper-failed");
+void main().catch((error: unknown) => {
+  helperDiagnostic("inventory-helper-failed", {
+    lastInventoryEvent: diagnosticLastInventoryEvent,
+    ...runtimeInventoryDiagnosticErrorFields(error),
+  });
   process.stdout.write(
     `${JSON.stringify({
       schemaVersion: 1,
