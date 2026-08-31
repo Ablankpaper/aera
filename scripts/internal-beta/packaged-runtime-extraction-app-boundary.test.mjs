@@ -16,4 +16,5 @@ test("passes the no-op extractor path into the packaged app evaluation", async (
     source,
     /app\.evaluate\([\s\S]*?noOpModulePath,\s*\n\s*timeoutMs,\s*\n\s*\},\s*\n\s*\);/u,
   );
+  assert.match(source, /moduleOverridePath:\s*config\.noOpModulePath/u);
 });

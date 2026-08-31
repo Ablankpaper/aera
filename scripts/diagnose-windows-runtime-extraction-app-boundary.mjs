@@ -153,7 +153,7 @@ async function runInApplication({
           name: "app-user-data-noasar-noop",
           noAsar: true,
           launchMode: "exec-file",
-          moduleOverridePath: noOpModulePath,
+          moduleOverridePath: config.noOpModulePath,
           destinationRoot: probeRoot,
         },
         {
