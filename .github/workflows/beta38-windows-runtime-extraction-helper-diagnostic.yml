@@ -1,0 +1,133 @@
+name: Beta.38 Windows Runtime extraction helper diagnostic
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact Desktop source SHA to package for the helper boundary
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+# Evidence-only. This workflow invokes the packaged helper directly and never
+# runs the Desktop installer, Gateway, candidate, signing, promotion, or
+# publication paths.
+concurrency:
+  group: beta38-windows-runtime-extraction-helper-diagnostic-${{ inputs.source_sha }}
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    name: Windows x64 Runtime extraction helper boundary
+    runs-on: windows-2025
+    timeout-minutes: 40
+    env:
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      MAIN_VITE_AGENTERA_CLOUD_PUBLIC_URL: https://127.0.0.1
+      MAIN_VITE_AGENTERA_OFFLINE_PUBLIC_KEYS_JSON: >-
+        {"issuer":"https://127.0.0.1","keys":[{"keyId":"diagnostic-v1","publicKey":"C1E62bSSQBXKCQLtB5BE06xdvsIwbwaUjBDajrbjny0"}]}
+      MAIN_VITE_HERMES_API_URL: https://127.0.0.1
+
+    steps:
+      - name: Check out exact diagnostic source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify exact source and Beta.38 identity
+        shell: pwsh
+        run: |
+          if ($env:SOURCE_SHA -notmatch '^[0-9a-f]{40}$') {
+            throw 'source_sha must be a full lowercase commit SHA'
+          }
+          if ((git rev-parse HEAD).Trim() -cne $env:SOURCE_SHA) {
+            throw 'Checked out source differs from source_sha'
+          }
+          if ((node -p "require('./package.json').version").Trim() -cne '0.7.4-internal-beta.38') {
+            throw 'Unexpected Desktop version'
+          }
+
+      - name: Require native Windows x64 runner
+        shell: pwsh
+        run: |
+          $architecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
+          if ($architecture -cne 'X64' -or $env:PROCESSOR_ARCHITECTURE -ne 'AMD64') {
+            throw "Diagnostic requires native Windows x64 ($architecture/$env:PROCESSOR_ARCHITECTURE)"
+          }
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Prepare the exact locked Runtime Seed
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          npm run prepare:runtime-seed -- --platform windows --arch x64
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Build and package an unsigned unpacked Electron app
+        shell: pwsh
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: |
+          npm run build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npx electron-builder `
+            --config build/electron-builder.internal-beta.yml `
+            --win dir --x64 --publish never `
+            --config.forceCodeSigning=false
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Run helper boundary variants once
+        shell: pwsh
+        run: |
+          $unpacked = @(Get-ChildItem dist -Directory | Where-Object { $_.Name -like '*unpacked' })
+          if ($unpacked.Count -ne 1) { throw 'Expected exactly one unpacked Windows app' }
+          $app = $unpacked[0].FullName
+          $resources = Join-Path $app 'resources'
+          $archive = @(Get-ChildItem resources/agentera-runtime-seed -File -Filter '*.zip')
+          $manifest = @(Get-ChildItem resources/agentera-runtime-seed -File -Filter '*.manifest.json')
+          if ($archive.Count -ne 1 -or $manifest.Count -ne 1) { throw 'Expected one locked Runtime archive and manifest' }
+          $evidence = Join-Path $env:RUNNER_TEMP 'beta38-windows-runtime-extraction-helper-diagnostic'
+          New-Item -ItemType Directory -Force -Path $evidence | Out-Null
+          node scripts/diagnose-windows-runtime-extraction-helper.mjs `
+            --electron (Join-Path $app 'Aera.exe') `
+            --resources $resources `
+            --archive $archive[0].FullName `
+            --manifest $manifest[0].FullName `
+            --output (Join-Path $evidence 'diagnostic.jsonl') `
+            --timeout-ms 90000
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Summarize helper boundary evidence
+        if: ${{ always() }}
+        shell: pwsh
+        run: |
+          $evidence = Join-Path $env:RUNNER_TEMP 'beta38-windows-runtime-extraction-helper-diagnostic'
+          $output = Join-Path $evidence 'diagnostic.jsonl'
+          if (Test-Path -LiteralPath $output -PathType Leaf) {
+            Get-Content -LiteralPath $output | Select-String -Pattern 'diagnostic-|validation-|variant-' | Select-Object -Last 160
+          } else {
+            Write-Warning 'Helper diagnostic evidence is missing'
+          }
+
+      - name: Upload helper boundary evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: beta38-windows-runtime-extraction-helper-diagnostic-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/beta38-windows-runtime-extraction-helper-diagnostic
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0

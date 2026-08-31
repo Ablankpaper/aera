@@ -270,6 +270,21 @@ The extraction-only diagnostic compares packaged native ZIP extraction with a se
 
 The dispatch-only evidence tooling in `scripts/diagnose-windows-runtime-extraction.mjs` and `.github/workflows/beta38-windows-runtime-extraction-diagnostic.yml` polls only run-owned output counts and bytes. It never invokes the installer, Gateway, health check, or final inventory verifier. A parent-owned timeout terminates each isolated child before its temporary directory is removed, so a native timeout with a completed control extraction identifies the native write/metadata boundary without authorizing a ZIP or Runtime Seed change.
 
+##### Windows extraction-helper boundary diagnostic
+
+This diagnostic invokes the shipped extraction helper directly against the locked archive and compares its process boundaries.
+
+`scripts/diagnose-windows-runtime-extraction-helper.mjs` and
+`.github/workflows/beta38-windows-runtime-extraction-helper-diagnostic.yml`
+compare the production minimum environment with an explicit safe Windows
+environment, validate the validation-helper to extraction-helper hand-off, and
+start the helper from a packaged Electron Node-mode parent. Each variant has a
+fresh transaction-shaped destination and a bounded parent-owned timeout;
+helper events, output tails, exit status, partial inventory counts, and timeout
+process snapshots are retained as evidence. A failure is expected diagnostic
+evidence, not a release gate bypass: the installer, Gateway, candidate,
+signing, promotion, and publication paths remain out of scope.
+
 #### Health child-process lifecycle evidence
 
 When diagnostics are enabled, each isolated health probe records its child lifecycle and timeout state so a packaged stall can be classified from evidence rather than timing assumptions.
