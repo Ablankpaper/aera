@@ -268,55 +268,6 @@ function makeProbeEnvironment(source) {
   return result;
 }
 
-async function walkProbeSnapshot(fs, pathModule, root) {
-  const queue = [root];
-  const samplePaths = [];
-  let files = 0;
-  let directories = 0;
-  let bytes = 0;
-  let entries = 0;
-  let truncated = false;
-  while (queue.length > 0) {
-    const current = queue.shift();
-    if (!current) break;
-    let children;
-    try {
-      children = await fs.readdir(current, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-    for (const child of children) {
-      entries += 1;
-      if (entries > 200_000) {
-        truncated = true;
-        return {
-          files,
-          directories,
-          bytes,
-          entries: 200_000,
-          truncated,
-          samplePaths,
-        };
-      }
-      const childPath = pathModule.join(current, child.name);
-      if (samplePaths.length < 64)
-        samplePaths.push(pathModule.relative(root, childPath));
-      if (child.isDirectory()) {
-        directories += 1;
-        queue.push(childPath);
-      } else if (child.isFile()) {
-        files += 1;
-        try {
-          bytes += (await fs.stat(childPath)).size;
-        } catch {
-          // A file may still be in flight.
-        }
-      }
-    }
-  }
-  return { files, directories, bytes, entries, truncated, samplePaths };
-}
-
 async function runInApplication({
   app,
   archivePath,
@@ -334,6 +285,59 @@ async function runInApplication({
       const childProcess = process.getBuiltinModule("node:child_process");
       const pathModule = process.getBuiltinModule("node:path");
       const os = process.getBuiltinModule("node:os");
+      const walkProbeSnapshot = async (root) => {
+        const queue = [root];
+        const samplePaths = [];
+        let files = 0;
+        let directories = 0;
+        let bytes = 0;
+        let entries = 0;
+        while (queue.length > 0) {
+          const current = queue.shift();
+          if (!current) break;
+          let children;
+          try {
+            children = await fs.readdir(current, { withFileTypes: true });
+          } catch {
+            continue;
+          }
+          for (const child of children) {
+            entries += 1;
+            if (entries > 200_000) {
+              return {
+                files,
+                directories,
+                bytes,
+                entries: 200_000,
+                truncated: true,
+                samplePaths,
+              };
+            }
+            const childPath = pathModule.join(current, child.name);
+            if (samplePaths.length < 64)
+              samplePaths.push(pathModule.relative(root, childPath));
+            if (child.isDirectory()) {
+              directories += 1;
+              queue.push(childPath);
+            } else if (child.isFile()) {
+              files += 1;
+              try {
+                bytes += (await fs.stat(childPath)).size;
+              } catch {
+                // A file may still be in flight.
+              }
+            }
+          }
+        }
+        return {
+          files,
+          directories,
+          bytes,
+          entries,
+          truncated: false,
+          samplePaths,
+        };
+      };
       const moduleBuiltin = process.getBuiltinModule("node:module");
       const electronModule = moduleBuiltin.createRequire(
         pathModule.join(
@@ -704,7 +708,7 @@ async function runInApplication({
               return [];
             }
           })();
-          const snapshot = await walkProbeSnapshot(fs, pathModule, destination);
+          const snapshot = await walkProbeSnapshot(destination);
           results.push({
             name: variant.name,
             noAsar: variant.noAsar,
