@@ -110,6 +110,7 @@ async function runInApplication({
     async ({ app: electronApp }, config) => {
       const fs = process.getBuiltinModule("node:fs/promises");
       const childProcess = process.getBuiltinModule("node:child_process");
+      const electronModule = process.getBuiltinModule("electron");
       const pathModule = process.getBuiltinModule("node:path");
       const os = process.getBuiltinModule("node:os");
       const appUserData = electronApp.getPath("userData");
@@ -153,6 +154,13 @@ async function runInApplication({
           noAsar: true,
           launchMode: "exec-file",
           moduleOverridePath: noOpModulePath,
+          destinationRoot: probeRoot,
+        },
+        {
+          name: "app-user-data-noasar-utility",
+          noAsar: true,
+          launchMode: "utility-process",
+          moduleOverridePath: null,
           destinationRoot: probeRoot,
         },
         {
@@ -220,6 +228,7 @@ async function runInApplication({
             let timer;
             let stdout = "";
             let stderr = "";
+            let utilityChild = false;
             const finish = (value) => {
               if (settled) return;
               settled = true;
@@ -227,7 +236,16 @@ async function runInApplication({
               resolve(value);
             };
             const terminate = () => {
-              if (!child || child.exitCode !== null) return;
+              if (!child) return;
+              if (utilityChild) {
+                try {
+                  child.kill();
+                } catch {
+                  // The bounded result below remains authoritative.
+                }
+                return;
+              }
+              if (child.exitCode !== null) return;
               try {
                 child.kill();
               } catch {
@@ -244,6 +262,14 @@ async function runInApplication({
                 // Best-effort diagnostic cleanup.
               }
             };
+            const attachUtilityStreams = () => {
+              child.stdout?.on("data", (chunk) => {
+                stdout += String(chunk);
+              });
+              child.stderr?.on("data", (chunk) => {
+                stderr += String(chunk);
+              });
+            };
             const complete = (errorCode, signal) => {
               finish({
                 outcome: errorCode || signal ? "failed" : "complete",
@@ -256,7 +282,37 @@ async function runInApplication({
               });
             };
             try {
-              if (variant.launchMode === "spawn") {
+              if (variant.launchMode === "utility-process") {
+                utilityChild = true;
+                child = electronModule.utilityProcess.fork(
+                  config.helperPath,
+                  [requestPath],
+                  {
+                    env: environment,
+                    cwd: process.cwd(),
+                    stdio: ["ignore", "pipe", "pipe"],
+                    serviceName: "Aera Runtime extraction diagnostic",
+                  },
+                );
+                attachUtilityStreams();
+                child.once("spawn", attachUtilityStreams);
+                child.once("error", (type, location, report) =>
+                  finish({
+                    outcome: "spawn-error",
+                    errorCode: "utility-process-error",
+                    signal: null,
+                    stdout: stdout.slice(-32_768),
+                    stderr: `${stderr}${String(type ?? "")} ${String(
+                      location ?? "",
+                    )} ${String(report ?? "")}`.slice(-32_768),
+                    childPid: child?.pid ?? null,
+                    durationMs: Date.now() - startedAt,
+                  }),
+                );
+                child.once("exit", (code) =>
+                  complete(code === 0 ? null : code, null),
+                );
+              } else if (variant.launchMode === "spawn") {
                 child = childProcess.spawn(
                   process.execPath,
                   [config.helperPath, requestPath],
@@ -438,7 +494,7 @@ async function main() {
   await writeFile(outputPath, "", { flag: "w", mode: 0o600 });
   emit(outputPath, "app-diagnostic-start", {
     timeoutMs,
-    variants: 6,
+    variants: 7,
     helper: redactedShape(helper, [electronPath, resourcesPath, archivePath]),
   });
   const temporaryRoot = await mkdtemp(
