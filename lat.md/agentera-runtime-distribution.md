@@ -287,6 +287,11 @@ process snapshots are retained as evidence. A failure is expected diagnostic
 evidence, not a release gate bypass: the installer, Gateway, candidate,
 signing, promotion, and publication paths remain out of scope.
 
+The packaged-app probe also includes a callback-driven `yauzl` control beside
+the async-iterator control. An optional `--only <variant>` argument runs one
+named app-boundary variant so a follow-up experiment can stay within one
+bounded timeout while changing only the reader or process boundary.
+
 ##### Windows inventory hash boundary diagnostic
 
 The inventory hash probe compares bounded hash-pool sizes on one extracted Windows Seed.

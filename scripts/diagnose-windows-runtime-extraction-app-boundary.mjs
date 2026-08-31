@@ -151,6 +151,106 @@ export default extract;
   );
 }
 
+async function writeCallbackExtractorModule(modulePath, yauzlPath) {
+  await writeFile(
+    modulePath,
+    `import { createWriteStream } from "node:fs";
+import { mkdir } from "node:fs/promises";
+import { createRequire } from "node:module";
+import { dirname, isAbsolute, join, relative } from "node:path";
+import { pipeline } from "node:stream/promises";
+
+const yauzl = createRequire(import.meta.url)(${JSON.stringify(yauzlPath)});
+
+function archivePath(name) {
+  if (name.includes("\\\\") || name.includes("\\0") || name.startsWith("/") || /^[A-Za-z]:/u.test(name)) {
+    throw new Error("unsafe archive member");
+  }
+  const parts = name.split("/");
+  if (parts[0] !== "agentera-runtime" || parts.some((part) => part === "..")) {
+    throw new Error("archive member is outside the Runtime root");
+  }
+  return parts.filter(Boolean).join("/");
+}
+
+function contained(root, target) {
+  const value = relative(root, target);
+  return value.length > 0 && value !== ".." && !value.startsWith("..\\\\") && !isAbsolute(value);
+}
+
+function openArchive(archive) {
+  return new Promise((resolve, reject) => {
+    yauzl.open(archive, { lazyEntries: true, decodeStrings: true, validateEntrySizes: true, strictFileNames: true }, (error, zipfile) => {
+      if (error || !zipfile) reject(error ?? new Error("cannot open archive"));
+      else resolve(zipfile);
+    });
+  });
+}
+
+function openReadStream(zipfile, entry) {
+  return new Promise((resolve, reject) => {
+    zipfile.openReadStream(entry, (error, stream) => {
+      if (error || !stream) reject(error ?? new Error("could not open stream"));
+      else resolve(stream);
+    });
+  });
+}
+
+export async function extract(archive, options) {
+  if (!options || typeof options.dir !== "string" || !isAbsolute(options.dir)) {
+    throw new Error("invalid extraction destination");
+  }
+  const zipfile = await openArchive(archive);
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let active = false;
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      zipfile.removeListener("entry", onEntry);
+      zipfile.removeListener("end", onEnd);
+      zipfile.removeListener("error", onError);
+      zipfile.close();
+      if (error) reject(error);
+      else resolve();
+    };
+    const onError = (error) => finish(error);
+    const onEnd = () => finish();
+    const onEntry = (entry) => {
+      if (active) return finish(new Error("yauzl callback overlap"));
+      active = true;
+      Promise.resolve().then(async () => {
+        const name = archivePath(entry.fileName);
+        const target = join(options.dir, ...name.split("/"));
+        if (!contained(options.dir, target)) throw new Error("archive member escapes destination");
+        if (entry.fileName.endsWith("/")) {
+          await mkdir(target, { recursive: true });
+          return;
+        }
+        await mkdir(dirname(target), { recursive: true });
+        const stream = await openReadStream(zipfile, entry);
+        await pipeline(stream, createWriteStream(target, { flags: "wx" }));
+      }).then(
+        () => {
+          active = false;
+          if (!settled) zipfile.readEntry();
+        },
+        (error) => finish(error),
+      );
+    };
+    zipfile.on("entry", onEntry);
+    zipfile.on("end", onEnd);
+    zipfile.on("error", onError);
+    zipfile.readEntry();
+  });
+}
+
+export default extract;
+`,
+    { flag: "wx", mode: 0o600 },
+  );
+}
+
 function makeProbeEnvironment(source) {
   const result = {
     ELECTRON_RUN_AS_NODE: "1",
@@ -174,7 +274,9 @@ async function runInApplication({
   resourcesPath,
   noOpModulePath,
   sequentialModulePath,
+  callbackModulePath,
   timeoutMs,
+  only,
 }) {
   return app.evaluate(
     async ({ app: electronApp }, config) => {
@@ -209,6 +311,13 @@ async function runInApplication({
         },
         ...(config.sequentialModulePath
           ? [
+              {
+                name: "app-user-data-noasar-yauzl-callback",
+                noAsar: true,
+                launchMode: "exec-file",
+                moduleOverridePath: config.callbackModulePath,
+                destinationRoot: probeRoot,
+              },
               {
                 name: "app-user-data-noasar-yauzl",
                 noAsar: true,
@@ -266,10 +375,16 @@ async function runInApplication({
           ),
         },
       ];
+      const selectedVariants = config.only
+        ? variants.filter((variant) => variant.name === config.only)
+        : variants;
+      if (config.only && selectedVariants.length !== 1) {
+        throw new Error(`unknown app-boundary variant: ${config.only}`);
+      }
       const results = [];
       const previousNoAsar = process.noAsar;
       try {
-        for (const variant of variants) {
+        for (const variant of selectedVariants) {
           const variantRoot = pathModule.join(
             variant.destinationRoot,
             variant.name,
@@ -573,7 +688,9 @@ async function runInApplication({
       diagnosticOutputName: DIAGNOSTIC_OUTPUT,
       noOpModulePath,
       sequentialModulePath,
+      callbackModulePath,
       timeoutMs,
+      only,
     },
   );
 }
@@ -593,6 +710,7 @@ async function main() {
   const timeoutMs = values.has("timeout-ms")
     ? parsePositiveInteger(values.get("timeout-ms"), "--timeout-ms")
     : DEFAULT_TIMEOUT_MS;
+  const only = values.get("only")?.trim() || null;
   for (const [label, candidate] of [
     ["Electron executable", electronPath],
     ["resources directory", resourcesPath],
@@ -610,7 +728,8 @@ async function main() {
   await writeFile(outputPath, "", { flag: "w", mode: 0o600 });
   emit(outputPath, "app-diagnostic-start", {
     timeoutMs,
-    variants: yauzlPath ? 8 : 7,
+    only,
+    variants: yauzlPath ? 9 : 7,
     helper: redactedShape(helper, [electronPath, resourcesPath, archivePath]),
   });
   const temporaryRoot = await mkdtemp(
@@ -622,6 +741,9 @@ async function main() {
   const sequentialModulePath = yauzlPath
     ? join(temporaryRoot, "runtime-extractor-yauzl.mjs")
     : null;
+  const callbackModulePath = yauzlPath
+    ? join(temporaryRoot, "runtime-extractor-yauzl-callback.mjs")
+    : null;
   await writeFile(
     noOpModulePath,
     "export async function extract() {}\nexport default extract;\n",
@@ -629,6 +751,7 @@ async function main() {
   );
   if (sequentialModulePath && yauzlPath) {
     await writeSequentialExtractorModule(sequentialModulePath, yauzlPath);
+    await writeCallbackExtractorModule(callbackModulePath, yauzlPath);
   }
   await mkdir(userData, { recursive: true, mode: 0o700 });
   await mkdir(hermesHome, { recursive: true, mode: 0o700 });
@@ -659,7 +782,9 @@ async function main() {
       resourcesPath,
       noOpModulePath,
       sequentialModulePath,
+      callbackModulePath,
       timeoutMs,
+      only,
     });
     emit(outputPath, "app-diagnostic-result", {
       processPid: result.processPid,

@@ -13,6 +13,10 @@ on:
         description: Exact Desktop source SHA to package for the helper boundary
         required: true
         type: string
+      only:
+        description: Optional single app-boundary variant to run
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -31,6 +35,7 @@ jobs:
     timeout-minutes: 40
     env:
       SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
+      ONLY_VARIANT: ${{ inputs.only || '' }}
       MAIN_VITE_AGENTERA_CLOUD_PUBLIC_URL: https://127.0.0.1
       MAIN_VITE_AGENTERA_OFFLINE_PUBLIC_KEYS_JSON: >-
         {"issuer":"https://127.0.0.1","keys":[{"keyId":"diagnostic-v1","publicKey":"C1E62bSSQBXKCQLtB5BE06xdvsIwbwaUjBDajrbjny0"}]}
@@ -131,13 +136,19 @@ jobs:
           $packagedArchive = @(Get-ChildItem (Join-Path $resources 'agentera-runtime-seed') -File -Filter '*.zip')
           if ($packagedArchive.Count -ne 1) { throw 'Expected one packaged Runtime archive' }
           $evidence = Join-Path $env:RUNNER_TEMP 'beta38-windows-runtime-extraction-helper-diagnostic'
-          node scripts/diagnose-windows-runtime-extraction-app-boundary.mjs `
-            --electron (Join-Path $app 'Aera.exe') `
-            --resources $resources `
-            --archive $packagedArchive[0].FullName `
-            --yauzl (Join-Path $env:GITHUB_WORKSPACE 'node_modules/yauzl/index.js') `
-            --output (Join-Path $evidence 'packaged-app-boundary.jsonl') `
-            --timeout-ms 180000
+          $arguments = @(
+            'scripts/diagnose-windows-runtime-extraction-app-boundary.mjs',
+            '--electron', (Join-Path $app 'Aera.exe'),
+            '--resources', $resources,
+            '--archive', $packagedArchive[0].FullName,
+            '--yauzl', (Join-Path $env:GITHUB_WORKSPACE 'node_modules/yauzl/index.js'),
+            '--output', (Join-Path $evidence 'packaged-app-boundary.jsonl'),
+            '--timeout-ms', '180000'
+          )
+          if (-not [string]::IsNullOrWhiteSpace($env:ONLY_VARIANT)) {
+            $arguments += @('--only', $env:ONLY_VARIANT)
+          }
+          node @arguments
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Summarize helper boundary evidence

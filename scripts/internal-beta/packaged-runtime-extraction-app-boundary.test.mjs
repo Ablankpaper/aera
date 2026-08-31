@@ -29,3 +29,24 @@ test("passes the no-op extractor path into the packaged app evaluation", async (
       source.indexOf('name: "app-user-data-noasar",'),
   );
 });
+
+test("includes a callback-driven yauzl control for the Electron app boundary", async () => {
+  const source = await readFile(diagnosticPath, "utf8");
+
+  assert.match(source, /callbackModulePath/u);
+  assert.match(source, /name: "app-user-data-noasar-yauzl-callback"/u);
+  assert.match(source, /zipfile\.on\(["']entry["']/u);
+  assert.match(source, /zipfile\.readEntry\(\)/u);
+});
+
+test("supports selecting one app-boundary variant for a bounded diagnostic run", async () => {
+  const source = await readFile(diagnosticPath, "utf8");
+
+  assert.match(source, /values\.get\(["']only["']\)/u);
+  assert.match(
+    source,
+    /async function runInApplication\([\s\S]*?\bonly,\n\s*\}\)/u,
+  );
+  assert.match(source, /config\.only/u);
+  assert.match(source, /variants\.filter/u);
+});
