@@ -110,9 +110,16 @@ async function runInApplication({
     async ({ app: electronApp }, config) => {
       const fs = process.getBuiltinModule("node:fs/promises");
       const childProcess = process.getBuiltinModule("node:child_process");
-      const electronModule = process.getBuiltinModule("electron");
       const pathModule = process.getBuiltinModule("node:path");
       const os = process.getBuiltinModule("node:os");
+      const moduleBuiltin = process.getBuiltinModule("node:module");
+      const electronModule = moduleBuiltin.createRequire(
+        pathModule.join(
+          process.resourcesPath ?? process.cwd(),
+          "app.asar",
+          "package.json",
+        ),
+      )("electron");
       const appUserData = electronApp.getPath("userData");
       const probeRoot = pathModule.join(
         appUserData,
@@ -123,32 +130,6 @@ async function runInApplication({
       const privateRoot = pathModule.join(probeRoot, "private");
       await fs.mkdir(privateRoot, { recursive: true, mode: 0o700 });
       const variants = [
-        {
-          name: "app-user-data-noasar",
-          noAsar: true,
-          launchMode: "exec-file",
-          moduleOverridePath: null,
-          destinationRoot: probeRoot,
-        },
-        {
-          name: "app-user-data-plain",
-          noAsar: false,
-          launchMode: "exec-file",
-          moduleOverridePath: null,
-          destinationRoot: probeRoot,
-        },
-        {
-          name: "app-temp-noasar",
-          noAsar: true,
-          launchMode: "exec-file",
-          moduleOverridePath: null,
-          destinationRoot: pathModule.join(
-            await fs.mkdtemp(
-              pathModule.join(os.tmpdir(), "aera-app-temp-probe-"),
-            ),
-            "runtime",
-          ),
-        },
         {
           name: "app-user-data-noasar-noop",
           noAsar: true,
@@ -176,6 +157,32 @@ async function runInApplication({
           launchMode: "exec-file-no-options",
           moduleOverridePath: null,
           destinationRoot: probeRoot,
+        },
+        {
+          name: "app-user-data-noasar",
+          noAsar: true,
+          launchMode: "exec-file",
+          moduleOverridePath: null,
+          destinationRoot: probeRoot,
+        },
+        {
+          name: "app-user-data-plain",
+          noAsar: false,
+          launchMode: "exec-file",
+          moduleOverridePath: null,
+          destinationRoot: probeRoot,
+        },
+        {
+          name: "app-temp-noasar",
+          noAsar: true,
+          launchMode: "exec-file",
+          moduleOverridePath: null,
+          destinationRoot: pathModule.join(
+            await fs.mkdtemp(
+              pathModule.join(os.tmpdir(), "aera-app-temp-probe-"),
+            ),
+            "runtime",
+          ),
         },
       ];
       const results = [];
@@ -235,7 +242,17 @@ async function runInApplication({
               if (timer) clearTimeout(timer);
               resolve(value);
             };
-            const terminate = () => {
+            const waitForTermination = async () => {
+              if (!child) return;
+              await Promise.race([
+                new Promise((resolve) => {
+                  child.once("close", resolve);
+                  child.once("exit", resolve);
+                }),
+                new Promise((resolve) => setTimeout(resolve, 2_000)),
+              ]);
+            };
+            const terminate = async () => {
               if (!child) return;
               if (utilityChild) {
                 try {
@@ -243,6 +260,7 @@ async function runInApplication({
                 } catch {
                   // The bounded result below remains authoritative.
                 }
+                await waitForTermination();
                 return;
               }
               if (child.exitCode !== null) return;
@@ -251,16 +269,34 @@ async function runInApplication({
               } catch {
                 // The bounded result below remains authoritative.
               }
-              try {
-                childProcess.execFile(
-                  "taskkill.exe",
-                  ["/PID", String(child.pid), "/T", "/F"],
-                  { windowsHide: true, timeout: 10_000 },
-                  () => undefined,
-                );
-              } catch {
-                // Best-effort diagnostic cleanup.
-              }
+              await Promise.race([
+                new Promise((resolve) => {
+                  try {
+                    childProcess.execFile(
+                      "taskkill.exe",
+                      ["/PID", String(child.pid), "/T", "/F"],
+                      { windowsHide: true, timeout: 10_000 },
+                      () => resolve(),
+                    );
+                  } catch {
+                    resolve();
+                  }
+                }),
+                new Promise((resolve) => setTimeout(resolve, 10_000)),
+              ]);
+              await waitForTermination();
+            };
+            const terminateAndFinish = async () => {
+              await terminate();
+              finish({
+                outcome: "timeout",
+                errorCode: "diagnostic-timeout",
+                signal: null,
+                stdout: "",
+                stderr: "",
+                childPid: child?.pid ?? null,
+                durationMs: Date.now() - startedAt,
+              });
             };
             const attachUtilityStreams = () => {
               child.stdout?.on("data", (chunk) => {
@@ -382,16 +418,7 @@ async function runInApplication({
                 );
               }
               timer = setTimeout(() => {
-                terminate();
-                finish({
-                  outcome: "timeout",
-                  errorCode: "diagnostic-timeout",
-                  signal: null,
-                  stdout: "",
-                  stderr: "",
-                  childPid: child?.pid ?? null,
-                  durationMs: Date.now() - startedAt,
-                });
+                void terminateAndFinish();
               }, config.timeoutMs + 2_000);
             } catch (error) {
               finish({

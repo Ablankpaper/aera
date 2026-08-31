@@ -17,4 +17,13 @@ test("passes the no-op extractor path into the packaged app evaluation", async (
     /app\.evaluate\([\s\S]*?noOpModulePath,\s*\n\s*timeoutMs,\s*\n\s*\},\s*\n\s*\);/u,
   );
   assert.match(source, /moduleOverridePath:\s*config\.noOpModulePath/u);
+  assert.match(
+    source,
+    /moduleBuiltin\.createRequire\([\s\S]*?\)\(\s*["']electron["']\s*\)/u,
+  );
+  assert.match(source, /await\s+terminate\(\);/u);
+  assert.ok(
+    source.indexOf('name: "app-user-data-noasar-noop"') <
+      source.indexOf('name: "app-user-data-noasar",'),
+  );
 });
