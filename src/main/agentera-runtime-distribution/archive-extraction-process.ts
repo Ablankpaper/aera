@@ -8,6 +8,7 @@ import { RuntimeExtractionError } from "./inventory";
 
 const HELPER_MARKER = "AGENTERA_RUNTIME_ARCHIVE_EXTRACTION_HELPER";
 const HELPER_DIAGNOSTIC_OUTPUT = "AGENTERA_RUNTIME_INVENTORY_DIAGNOSTIC_OUTPUT";
+const HELPER_EXTRACTION_MODE = "AGENTERA_RUNTIME_ARCHIVE_EXTRACTION_MODE";
 const HELPER_TERMINATION_GRACE_MS = 1_000;
 const HELPER_ENVIRONMENT_KEYS = [
   "SystemRoot",
@@ -146,6 +147,7 @@ export function buildRuntimeArchiveExtractionHelperEnvironment(
   const result: NodeJS.ProcessEnv = {
     ELECTRON_RUN_AS_NODE: "1",
     [HELPER_MARKER]: "1",
+    [HELPER_EXTRACTION_MODE]: "sequential",
   };
   for (const key of HELPER_ENVIRONMENT_KEYS) {
     const value = sourceEnvironment[key];

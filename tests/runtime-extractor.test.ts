@@ -4,6 +4,7 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  readlink,
   rm,
   stat,
   writeFile,
@@ -23,6 +24,7 @@ import {
   shouldEnforceExtractedRuntimeMode,
   verifyExtractedRuntimeInventory,
 } from "../src/main/agentera-runtime-distribution/extractor";
+import { extractRuntimeArchiveSequentially } from "../src/main/agentera-runtime-distribution/sequential-zip-extractor";
 import {
   type RuntimeManifest,
   type RuntimeManifestFile,
@@ -394,7 +396,7 @@ describe("Runtime Seed extractor", () => {
     );
   });
 
-  it("uses the packaged native parallel extractor for Windows ZIP writes", async () => {
+  it("does not eagerly load the native ZIP binding in the main process", async () => {
     const source = await readFile(
       join(
         process.cwd(),
@@ -403,14 +405,11 @@ describe("Runtime Seed extractor", () => {
       "utf8",
     );
 
-    expect(source).toMatch(
-      /import\s*\{\s*extract\s+as\s+extractZip\s*\}\s*from\s*"@electron-internal\/extract-zip"/u,
-    );
     expect(source).not.toMatch(
-      /import\s+extractZip\s+from\s+"@electron-internal\/extract-zip"/u,
+      /^\s*import\s*\{[^\n]*extract[^\n]*\}\s*from\s*["']@electron-internal\/extract-zip["']/mu,
     );
     expect(source).toMatch(
-      /await\s+extractZip\(archivePath,\s*\{\s*dir:\s*workDirectory\s*\}\)/u,
+      /await\s+import\(\s*["']@electron-internal\/extract-zip["']\s*\)/u,
     );
   });
 
@@ -481,6 +480,120 @@ describe("Runtime Seed extractor", () => {
     ).rejects.toMatchObject({
       code: "ENOENT",
     });
+  });
+
+  it("can extract a verified Windows ZIP sequentially", async () => {
+    const root = await workspace();
+    const value = manifest("windows");
+    const archivePath = await writeZip(root, archiveEntries(value.files));
+    const destination = join(root, "payload.zip-extracting");
+    await mkdir(destination, { recursive: false, mode: 0o700 });
+
+    await extractRuntimeArchiveSequentially(archivePath, destination);
+
+    expect(
+      await readFile(
+        join(destination, "agentera-runtime", "runtime", "hermes"),
+        "utf8",
+      ),
+    ).toBe(hermesBody.toString("utf8"));
+    expect(
+      await stat(
+        join(destination, "agentera-runtime", "python", "bin", "python3"),
+      ),
+    ).toMatchObject({ isFile: expect.any(Function) });
+  });
+
+  it("rejects unsafe members before sequential ZIP writes", async () => {
+    const root = await workspace();
+    const value = manifest("windows");
+    const archivePath = await writeZip(
+      root,
+      archiveEntries(value.files, [
+        {
+          name: "agentera-runtime/../escape.txt",
+          kind: "file",
+          body: Buffer.from("escape", "utf8"),
+        },
+      ]),
+    );
+    const destination = join(root, "payload.zip-extracting");
+    await mkdir(destination, { recursive: false, mode: 0o700 });
+
+    await expect(
+      extractRuntimeArchiveSequentially(archivePath, destination),
+    ).rejects.toThrow(/invalid|unsafe|outside|escapes/i);
+    await expect(stat(join(root, "escape.txt"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
+  it("rejects sequential ZIP symlinks that leave the Runtime root", async () => {
+    const root = await workspace();
+    const value = manifest("windows");
+    const archivePath = await writeZip(
+      root,
+      archiveEntries(value.files, [
+        {
+          name: "agentera-runtime/runtime/escape-link",
+          kind: "symlink",
+          linkTarget: "../../outside",
+        },
+      ]),
+    );
+    const destination = join(root, "payload.zip-extracting");
+    await mkdir(destination, { recursive: false, mode: 0o700 });
+
+    await expect(
+      extractRuntimeArchiveSequentially(archivePath, destination),
+    ).rejects.toThrow(/symlink|target|escape|root/i);
+    await expect(lstat(join(root, "outside"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
+  it("rejects a sequential ZIP symlink target containing a NUL byte", async () => {
+    const root = await workspace();
+    const value = manifest("windows");
+    const archivePath = await writeZip(
+      root,
+      archiveEntries(value.files, [
+        {
+          name: "agentera-runtime/runtime/nul-link",
+          kind: "symlink",
+          linkTarget: "hermes\0",
+        },
+      ]),
+    );
+    const destination = join(root, "payload.zip-extracting");
+    await mkdir(destination, { recursive: false, mode: 0o700 });
+
+    await expect(
+      extractRuntimeArchiveSequentially(archivePath, destination),
+    ).rejects.toThrow(/symlink|target|invalid/i);
+  });
+
+  it("creates a sequential ZIP symlink only after validating its target", async () => {
+    const root = await workspace();
+    const value = manifest("windows");
+    const archivePath = await writeZip(
+      root,
+      archiveEntries(value.files, [
+        {
+          name: "agentera-runtime/runtime/current",
+          kind: "symlink",
+          linkTarget: "hermes",
+        },
+      ]),
+    );
+    const destination = join(root, "payload.zip-extracting");
+    await mkdir(destination, { recursive: false, mode: 0o700 });
+
+    await extractRuntimeArchiveSequentially(archivePath, destination);
+
+    await expect(
+      readlink(join(destination, "agentera-runtime", "runtime", "current")),
+    ).resolves.toBe("hermes");
   });
 
   it("bypasses Electron ASAR interception for Windows extraction and restores it", async () => {

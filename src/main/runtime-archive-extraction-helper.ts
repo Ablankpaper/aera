@@ -1,10 +1,14 @@
 import { appendFileSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
+import { availableParallelism } from "node:os";
 import { pathToFileURL } from "node:url";
-import { isAbsolute, join, win32 } from "node:path";
+import { basename, isAbsolute, join, win32 } from "node:path";
+
+import { extractRuntimeArchiveSequentially } from "./agentera-runtime-distribution/sequential-zip-extractor";
 
 const HELPER_MARKER = "AGENTERA_RUNTIME_ARCHIVE_EXTRACTION_HELPER";
 const DIAGNOSTIC_OUTPUT = "AGENTERA_RUNTIME_INVENTORY_DIAGNOSTIC_OUTPUT";
+const EXTRACTOR_MODE = "AGENTERA_RUNTIME_ARCHIVE_EXTRACTION_MODE";
 const MAX_REQUEST_BYTES = 32 * 1024;
 const EXPECTED_REQUEST_FIELDS = new Set([
   "schemaVersion",
@@ -104,7 +108,12 @@ async function loadExtractor(): Promise<
 }
 
 async function main(): Promise<void> {
-  helperDiagnostic("archive-extraction-helper-main-start");
+  helperDiagnostic("archive-extraction-helper-main-start", {
+    availableParallelism: availableParallelism(),
+    cwdLength: process.cwd().length,
+    execPathBasename: basename(process.execPath),
+    noAsar: Boolean((process as NodeJS.Process & { noAsar?: boolean }).noAsar),
+  });
   if (process.env[HELPER_MARKER] !== "1" || process.argv.length !== 3) {
     throw new Error("invalid invocation");
   }
@@ -125,11 +134,43 @@ async function main(): Promise<void> {
   if (!destinationMetadata.isDirectory()) {
     throw new Error("invalid extraction destination");
   }
-  const extract = await loadExtractor();
+  helperDiagnostic("archive-extraction-helper-load-start");
+  const moduleOverridePath =
+    process.env.AGENTERA_RUNTIME_EXTRACT_ZIP_MODULE_PATH?.trim();
+  const useNativeExtractor =
+    moduleOverridePath !== undefined && moduleOverridePath.length > 0
+      ? true
+      : process.env[EXTRACTOR_MODE]?.trim().toLowerCase() === "native";
+  const extract = useNativeExtractor
+    ? await loadExtractor()
+    : (archivePath: string, options: { dir: string }) =>
+        extractRuntimeArchiveSequentially(archivePath, options.dir);
+  helperDiagnostic("archive-extraction-helper-load-complete", {
+    implementation: useNativeExtractor ? "native" : "sequential",
+  });
   const startedAt = Date.now();
-  await extract(request.archivePath, { dir: request.destination });
+  const startedCpu = process.cpuUsage();
+  helperDiagnostic("archive-extraction-helper-extract-start");
+  const heartbeat = setInterval(() => {
+    const cpu = process.cpuUsage(startedCpu);
+    helperDiagnostic("archive-extraction-helper-extract-heartbeat", {
+      durationMs: Math.max(0, Date.now() - startedAt),
+      availableParallelism: availableParallelism(),
+      cpuUserMicros: cpu.user,
+      cpuSystemMicros: cpu.system,
+    });
+  }, 5_000);
+  heartbeat.unref?.();
+  try {
+    await extract(request.archivePath, { dir: request.destination });
+  } finally {
+    clearInterval(heartbeat);
+  }
   helperDiagnostic("archive-extraction-helper-result-written", {
     durationMs: Math.max(0, Date.now() - startedAt),
+    availableParallelism: availableParallelism(),
+    cpuUserMicros: process.cpuUsage(startedCpu).user,
+    cpuSystemMicros: process.cpuUsage(startedCpu).system,
   });
   process.stdout.write('{"schemaVersion":1,"ok":true}\n');
 }
