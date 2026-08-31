@@ -102,15 +102,20 @@ jobs:
           if ($unpacked.Count -ne 1) { throw 'Expected exactly one unpacked Windows app' }
           $app = $unpacked[0].FullName
           $resources = Join-Path $app 'resources'
-          $archive = @(Get-ChildItem resources/agentera-runtime-seed -File -Filter '*.zip')
+          $sourceArchive = @(Get-ChildItem resources/agentera-runtime-seed -File -Filter '*.zip')
+          $packagedArchive = @(Get-ChildItem (Join-Path $resources 'agentera-runtime-seed') -File -Filter '*.zip')
           $manifest = @(Get-ChildItem resources/agentera-runtime-seed -File -Filter '*.manifest.json')
-          if ($archive.Count -ne 1 -or $manifest.Count -ne 1) { throw 'Expected one locked Runtime archive and manifest' }
+          if ($sourceArchive.Count -ne 1 -or $packagedArchive.Count -ne 1 -or $manifest.Count -ne 1) { throw 'Expected one source/package Runtime archive and manifest' }
+          $sourceHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $sourceArchive[0].FullName).Hash
+          $packagedHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $packagedArchive[0].FullName).Hash
+          if ($sourceHash -cne $packagedHash) { throw "Packaged Runtime archive differs from source ($sourceHash/$packagedHash)" }
           $evidence = Join-Path $env:RUNNER_TEMP 'beta38-windows-runtime-extraction-helper-diagnostic'
           New-Item -ItemType Directory -Force -Path $evidence | Out-Null
           node scripts/diagnose-windows-runtime-extraction-helper.mjs `
             --electron (Join-Path $app 'Aera.exe') `
             --resources $resources `
-            --archive $archive[0].FullName `
+            --archive $sourceArchive[0].FullName `
+            --packaged-archive $packagedArchive[0].FullName `
             --manifest $manifest[0].FullName `
             --output (Join-Path $evidence 'diagnostic.jsonl') `
             --timeout-ms 90000

@@ -125,8 +125,11 @@ async function main(): Promise<void> {
   if (!destinationMetadata.isDirectory()) {
     throw new Error("invalid extraction destination");
   }
+  helperDiagnostic("archive-extraction-helper-load-start");
   const extract = await loadExtractor();
+  helperDiagnostic("archive-extraction-helper-load-complete");
   const startedAt = Date.now();
+  helperDiagnostic("archive-extraction-helper-extract-start");
   await extract(request.archivePath, { dir: request.destination });
   helperDiagnostic("archive-extraction-helper-result-written", {
     durationMs: Math.max(0, Date.now() - startedAt),

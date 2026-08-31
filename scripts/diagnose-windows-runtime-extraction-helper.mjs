@@ -69,6 +69,19 @@ function parsePositiveInteger(value, name) {
   return parsed;
 }
 
+function executionOptions(mode, timeoutMs) {
+  if (mode !== "production") return { options: {}, controller: null };
+  const controller = new AbortController();
+  return {
+    controller,
+    options: {
+      signal: controller.signal,
+      timeout: timeoutMs,
+      killSignal: "SIGTERM",
+    },
+  };
+}
+
 function parseArgs(argv) {
   const values = new Map();
   for (let index = 0; index < argv.length; index += 1) {
@@ -346,7 +359,14 @@ async function terminateChild(child) {
   };
 }
 
-function executeWithExecFile(command, args, options, timeoutMs, privateValues) {
+function executeWithExecFile(
+  command,
+  args,
+  options,
+  timeoutMs,
+  privateValues,
+  controller = null,
+) {
   return new Promise((resolve) => {
     let settled = false;
     let timedOut = false;
@@ -401,6 +421,7 @@ function executeWithExecFile(command, args, options, timeoutMs, privateValues) {
       timeoutHandle = setTimeout(async () => {
         if (settled) return;
         timedOut = true;
+        controller?.abort();
         const snapshot = await processSnapshot(childPid, privateValues);
         const termination = await terminateChild(child);
         finish({
@@ -472,6 +493,8 @@ async function runHelperVariant({
   environmentMode,
   moduleOverride,
   privateValues,
+  executionMode = "plain",
+  directoryMode = "default",
 }) {
   const variantRoot = path.join(root, name);
   const destination = path.join(
@@ -480,7 +503,10 @@ async function runHelperVariant({
     "transaction",
     "payload.zip-extracting",
   );
-  await mkdir(destination, { recursive: true });
+  await mkdir(destination, {
+    recursive: true,
+    mode: directoryMode === "private" ? 0o700 : 0o755,
+  });
   const requestPath = await writeExtractionRequest(
     variantRoot,
     archivePath,
@@ -515,14 +541,18 @@ async function runHelperVariant({
     name,
     environmentMode,
     moduleOverride: Boolean(moduleOverride),
+    executionMode,
+    directoryMode,
     timeoutMs,
   });
+  const execution = executionOptions(executionMode, timeoutMs);
   const result = await executeWithExecFile(
     electronPath,
     [helperPath, requestPath],
-    { env },
+    { env, ...execution.options },
     timeoutMs,
     privateValues,
+    execution.controller,
   );
   const snapshot = await walkSnapshot(destination);
   const helperEvents = existsSync(eventsPath)
@@ -581,6 +611,10 @@ async function runElectronParentVariant({
   emit,
   privateValues,
   parentProbePath,
+  executionMode = "plain",
+  parentContext = "none",
+  directoryMode = "default",
+  modulePath,
 }) {
   const variantRoot = path.join(root, name);
   const destination = path.join(
@@ -589,7 +623,10 @@ async function runElectronParentVariant({
     "transaction",
     "payload.zip-extracting",
   );
-  await mkdir(destination, { recursive: true });
+  await mkdir(destination, {
+    recursive: true,
+    mode: directoryMode === "private" ? 0o700 : 0o755,
+  });
   const requestPath = await writeExtractionRequest(
     variantRoot,
     archivePath,
@@ -604,7 +641,17 @@ async function runElectronParentVariant({
   );
   await writeFile(
     configPath,
-    `${JSON.stringify({ electronPath, helperPath, requestPath, helperEnv })}\n`,
+    `${JSON.stringify({
+      electronPath,
+      helperPath,
+      requestPath,
+      helperEnv,
+      executionMode,
+      parentContext,
+      modulePath: modulePath ?? null,
+      timeoutMs,
+      parentEventsPath: path.join(variantRoot, "parent-events.jsonl"),
+    })}\n`,
     { flag: "wx", mode: 0o600 },
   );
   const parentEnv = {
@@ -612,13 +659,22 @@ async function runElectronParentVariant({
     ELECTRON_RUN_AS_NODE: "1",
     [ELECTRON_PARENT_MARKER]: "1",
   };
-  emit("variant-start", { name, parent: "packaged-electron-node", timeoutMs });
+  emit("variant-start", {
+    name,
+    parent: "packaged-electron-node",
+    executionMode,
+    parentContext,
+    directoryMode,
+    timeoutMs,
+  });
+  const execution = executionOptions(executionMode, timeoutMs);
   const result = await executeWithExecFile(
     electronPath,
     [parentProbePath, configPath],
-    { env: parentEnv },
+    { env: parentEnv, ...execution.options },
     timeoutMs,
     privateValues,
+    execution.controller,
   );
   const snapshot = await walkSnapshot(destination);
   const helperEvents = existsSync(eventsPath)
@@ -634,8 +690,36 @@ async function runElectronParentVariant({
           }
         })
     : [];
-  emit("variant-complete", { name, ...result, ...snapshot, helperEvents });
-  return { name, result, snapshot, helperEvents, eventsPath };
+  const parentEventsPath = path.join(variantRoot, "parent-events.jsonl");
+  const parentEvents = existsSync(parentEventsPath)
+    ? (await readFile(parentEventsPath, "utf8"))
+        .trim()
+        .split(/\r?\n/u)
+        .filter(Boolean)
+        .map((line) => {
+          try {
+            return JSON.parse(line);
+          } catch {
+            return { event: "invalid-parent-event" };
+          }
+        })
+    : [];
+  emit("variant-complete", {
+    name,
+    ...result,
+    ...snapshot,
+    helperEvents,
+    parentEvents,
+  });
+  return {
+    name,
+    result,
+    snapshot,
+    helperEvents,
+    parentEvents,
+    eventsPath,
+    parentEventsPath,
+  };
 }
 
 async function runValidationThenExtraction({
@@ -650,6 +734,8 @@ async function runValidationThenExtraction({
   timeoutMs,
   emit,
   privateValues,
+  executionMode = "plain",
+  directoryMode = "default",
 }) {
   const variantRoot = path.join(root, name);
   const destination = path.join(
@@ -658,7 +744,10 @@ async function runValidationThenExtraction({
     "transaction",
     "payload.zip-extracting",
   );
-  await mkdir(destination, { recursive: true });
+  await mkdir(destination, {
+    recursive: true,
+    mode: directoryMode === "private" ? 0o700 : 0o755,
+  });
   const validationRequest = await writeValidationRequest(
     variantRoot,
     archivePath,
@@ -674,12 +763,14 @@ async function runValidationThenExtraction({
     validationEventsPath,
   );
   emit("validation-start", { name, timeoutMs });
+  const validationExecution = executionOptions(executionMode, timeoutMs);
   const validation = await executeWithExecFile(
     electronPath,
     [validationHelperPath, validationRequest],
-    { env: validationEnv },
+    { env: validationEnv, ...validationExecution.options },
     timeoutMs,
     privateValues,
+    validationExecution.controller,
   );
   emit("validation-complete", { name, ...validation });
   const extractionRequest = await writeExtractionRequest(
@@ -696,12 +787,14 @@ async function runValidationThenExtraction({
     EXTRACTION_MARKER,
     extractionEventsPath,
   );
+  const extractionExecution = executionOptions(executionMode, timeoutMs);
   const extraction = await executeWithExecFile(
     electronPath,
     [extractionHelperPath, extractionRequest],
-    { env: extractionEnv },
+    { env: extractionEnv, ...extractionExecution.options },
     timeoutMs,
     privateValues,
+    extractionExecution.controller,
   );
   const snapshot = await walkSnapshot(destination);
   const readEvents = async (filePath) =>
@@ -744,7 +837,60 @@ async function writeElectronParentProbe(directory) {
   const probePath = path.join(directory, "electron-parent-probe.cjs");
   await writeFile(
     probePath,
-    `const { execFile } = require("node:child_process");\nconst { readFileSync } = require("node:fs");\nif (process.env["${ELECTRON_PARENT_MARKER}"] !== "1" || process.argv.length !== 3) process.exit(2);\nconst config = JSON.parse(readFileSync(process.argv[2], "utf8"));\nlet stdout = ""; let stderr = "";\nconst child = execFile(config.electronPath, [config.helperPath, config.requestPath], { env: config.helperEnv, windowsHide: true, encoding: "utf8", maxBuffer: 64 * 1024 }, (error, out, err) => { stdout = String(out ?? ""); stderr = String(err ?? ""); process.stdout.write(JSON.stringify({ errorCode: error?.code ?? null, signal: error?.signal ?? null, stdout, stderr }) + "\\n"); });\nchild.on("error", (error) => { process.stdout.write(JSON.stringify({ errorCode: error?.code ?? "spawn-error", signal: null, stdout, stderr }) + "\\n"); });\n`,
+    `const { execFile } = require("node:child_process");
+const { appendFileSync, readFileSync } = require("node:fs");
+const { pathToFileURL } = require("node:url");
+const marker = "${ELECTRON_PARENT_MARKER}";
+if (process.env[marker] !== "1" || process.argv.length !== 3) process.exit(2);
+const config = JSON.parse(readFileSync(process.argv[2], "utf8"));
+function event(name, fields = {}) {
+  const output = config.parentEventsPath;
+  if (!output) return;
+  try { appendFileSync(output, JSON.stringify({ event: name, timestampMs: Date.now(), ...fields }) + "\\n", "utf8"); } catch {}
+}
+async function main() {
+  event("parent-start", { executionMode: config.executionMode, parentContext: config.parentContext });
+  if (config.parentContext === "noasar" || config.parentContext === "native-noasar") {
+    process.noAsar = true;
+    event("parent-noasar-enabled");
+  }
+  if (config.parentContext === "native" || config.parentContext === "native-noasar") {
+    event("parent-native-import-start");
+    const loaded = await import(pathToFileURL(config.modulePath).href);
+    if (typeof (loaded.extract ?? loaded.default) !== "function") throw new Error("native extractor export is unavailable");
+    event("parent-native-import-complete");
+  }
+  const controller = config.executionMode === "production" ? new AbortController() : null;
+  const options = { env: config.helperEnv, windowsHide: true, encoding: "utf8", maxBuffer: 64 * 1024 };
+  if (controller) {
+    options.signal = controller.signal;
+    options.timeout = config.timeoutMs;
+    options.killSignal = "SIGTERM";
+  }
+  event("parent-child-spawn-start", { hasSignal: Boolean(controller), hasTimeout: Boolean(controller) });
+  await new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (error, out, err) => {
+      if (settled) return;
+      settled = true;
+      const stdout = String(out ?? "");
+      const stderr = String(err ?? "");
+      event("parent-child-complete", { errorCode: error?.code ?? null, signal: error?.signal ?? null });
+      process.stdout.write(JSON.stringify({ errorCode: error?.code ?? null, signal: error?.signal ?? null, stdout, stderr }) + "\\n");
+      if (error) reject(error); else resolve();
+    };
+    let child;
+    try {
+      child = execFile(config.electronPath, [config.helperPath, config.requestPath], options, finish);
+      child.once("error", (error) => finish(error, "", ""));
+    } catch (error) { finish(error, "", ""); }
+  });
+}
+main().catch((error) => {
+  event("parent-failed", { name: error?.name ?? "Error", code: error?.code ?? null });
+  process.exitCode = 1;
+});
+`,
     { flag: "wx", mode: 0o600 },
   );
   return probePath;
@@ -757,6 +903,9 @@ async function parentMain(values) {
     "--resources",
   );
   const archivePath = requiredAbsolute(values.get("archive"), "--archive");
+  const packagedArchivePath = values.has("packaged-archive")
+    ? requiredAbsolute(values.get("packaged-archive"), "--packaged-archive")
+    : archivePath;
   const manifestPath = requiredAbsolute(values.get("manifest"), "--manifest");
   const outputPath = requiredAbsolute(values.get("output"), "--output");
   const timeoutMs = values.has("timeout-ms")
@@ -766,6 +915,7 @@ async function parentMain(values) {
     ["Electron executable", electronPath],
     ["resources directory", resourcesPath],
     ["Runtime archive", archivePath],
+    ["packaged Runtime archive", packagedArchivePath],
     ["manifest", manifestPath],
   ]) {
     if (!existsSync(value)) throw new Error(`${name} does not exist`);
@@ -786,21 +936,27 @@ async function parentMain(values) {
     electronPath,
     resourcesPath,
     archivePath,
+    packagedArchivePath,
     manifestPath,
     runRoot,
   ];
   const results = [];
+  const parentProbePath = await writeElectronParentProbe(runRoot);
+  const shimDirectory = path.join(runRoot, "shim");
+  await mkdir(shimDirectory, { recursive: true });
+  const shimPath = await writeShim(shimDirectory);
   emit("diagnostic-start", {
     platform: process.platform,
     architecture: process.arch,
     archiveBytes: (await stat(archivePath)).size,
+    packagedArchiveBytes: (await stat(packagedArchivePath)).size,
     timeoutMs,
-    variants: 5,
+    variants: 9,
   });
   try {
     results.push(
       await runHelperVariant({
-        name: "helper-minimal",
+        name: "helper-minimal-source",
         electronPath,
         helperPath: paths.extraction,
         archivePath,
@@ -815,7 +971,7 @@ async function parentMain(values) {
     );
     results.push(
       await runHelperVariant({
-        name: "helper-extended",
+        name: "helper-extended-source",
         electronPath,
         helperPath: paths.extraction,
         archivePath,
@@ -828,27 +984,9 @@ async function parentMain(values) {
         privateValues,
       }),
     );
-    results.push(
-      await runValidationThenExtraction({
-        name: "validation-then-helper",
-        electronPath,
-        validationHelperPath: paths.validation,
-        extractionHelperPath: paths.extraction,
-        archivePath,
-        manifest,
-        root: runRoot,
-        sourceEnvironment: process.env,
-        timeoutMs,
-        emit,
-        privateValues,
-      }),
-    );
-    const shimDirectory = path.join(runRoot, "shim");
-    await mkdir(shimDirectory, { recursive: true });
-    const shimPath = await writeShim(shimDirectory);
     results.push(
       await runHelperVariant({
-        name: "helper-shim-stages",
+        name: "helper-production-options-source",
         electronPath,
         helperPath: paths.extraction,
         archivePath,
@@ -857,18 +995,31 @@ async function parentMain(values) {
         sourceEnvironment: process.env,
         timeoutMs,
         emit,
-        environmentMode: "extended",
-        moduleOverride: {
-          path: shimPath,
-          output: path.join(runRoot, "shim-events.jsonl"),
-        },
+        environmentMode: "minimal",
+        executionMode: "production",
         privateValues,
       }),
     );
-    const parentProbePath = await writeElectronParentProbe(runRoot);
+    results.push(
+      await runHelperVariant({
+        name: "helper-production-options-packaged",
+        electronPath,
+        helperPath: paths.extraction,
+        archivePath: packagedArchivePath,
+        resourcesPath,
+        root: runRoot,
+        sourceEnvironment: process.env,
+        timeoutMs,
+        emit,
+        environmentMode: "minimal",
+        executionMode: "production",
+        directoryMode: "private",
+        privateValues,
+      }),
+    );
     results.push(
       await runElectronParentVariant({
-        name: "helper-electron-parent",
+        name: "helper-production-noasar-source",
         electronPath,
         helperPath: paths.extraction,
         archivePath,
@@ -878,6 +1029,82 @@ async function parentMain(values) {
         emit,
         privateValues,
         parentProbePath,
+        executionMode: "production",
+        parentContext: "noasar",
+        directoryMode: "private",
+      }),
+    );
+    results.push(
+      await runHelperVariant({
+        name: "helper-production-packaged-shim",
+        electronPath,
+        helperPath: paths.extraction,
+        archivePath: packagedArchivePath,
+        resourcesPath,
+        root: runRoot,
+        sourceEnvironment: process.env,
+        timeoutMs,
+        emit,
+        environmentMode: "extended",
+        executionMode: "production",
+        directoryMode: "private",
+        moduleOverride: {
+          path: shimPath,
+          output: path.join(runRoot, "shim-events.jsonl"),
+        },
+        privateValues,
+      }),
+    );
+    results.push(
+      await runElectronParentVariant({
+        name: "helper-production-native-parent-source",
+        electronPath,
+        helperPath: paths.extraction,
+        archivePath,
+        root: runRoot,
+        sourceEnvironment: process.env,
+        timeoutMs,
+        emit,
+        privateValues,
+        parentProbePath,
+        executionMode: "production",
+        parentContext: "native",
+        modulePath: paths.nativeModule,
+      }),
+    );
+    results.push(
+      await runElectronParentVariant({
+        name: "helper-production-full-packaged",
+        electronPath,
+        helperPath: paths.extraction,
+        archivePath: packagedArchivePath,
+        root: runRoot,
+        sourceEnvironment: process.env,
+        timeoutMs,
+        emit,
+        privateValues,
+        parentProbePath,
+        executionMode: "production",
+        parentContext: "native-noasar",
+        directoryMode: "private",
+        modulePath: paths.nativeModule,
+      }),
+    );
+    results.push(
+      await runValidationThenExtraction({
+        name: "validation-then-production-packaged",
+        electronPath,
+        validationHelperPath: paths.validation,
+        extractionHelperPath: paths.extraction,
+        archivePath: packagedArchivePath,
+        manifest,
+        root: runRoot,
+        sourceEnvironment: process.env,
+        timeoutMs,
+        emit,
+        privateValues,
+        executionMode: "production",
+        directoryMode: "private",
       }),
     );
   } finally {
@@ -885,6 +1112,7 @@ async function parentMain(values) {
       const eventFiles = [
         [result.eventsPath, `${result.name}-events.jsonl`],
         [result.shimEventsPath, `${result.name}-shim-events.jsonl`],
+        [result.parentEventsPath, `${result.name}-parent-events.jsonl`],
         [result.validationEventsPath, `${result.name}-validation-events.jsonl`],
         [result.extractionEventsPath, `${result.name}-extraction-events.jsonl`],
       ];
