@@ -1,6 +1,12 @@
 name: Beta.38 Windows Runtime extraction helper diagnostic
 
 on:
+  # The push trigger is a one-run bootstrap because GitHub only registers a
+  # newly added workflow after it appears on the default branch. It can still
+  # be invoked manually once the workflow is registered.
+  push:
+    branches:
+      - fix/beta38-extraction-helper-boundary
   workflow_dispatch:
     inputs:
       source_sha:
@@ -24,7 +30,7 @@ jobs:
     runs-on: windows-2025
     timeout-minutes: 40
     env:
-      SOURCE_SHA: ${{ inputs.source_sha }}
+      SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
       MAIN_VITE_AGENTERA_CLOUD_PUBLIC_URL: https://127.0.0.1
       MAIN_VITE_AGENTERA_OFFLINE_PUBLIC_KEYS_JSON: >-
         {"issuer":"https://127.0.0.1","keys":[{"keyId":"diagnostic-v1","publicKey":"C1E62bSSQBXKCQLtB5BE06xdvsIwbwaUjBDajrbjny0"}]}
@@ -34,7 +40,7 @@ jobs:
       - name: Check out exact diagnostic source
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.source_sha }}
+          ref: ${{ inputs.source_sha || github.sha }}
           fetch-depth: 1
           persist-credentials: false
 
