@@ -212,6 +212,24 @@ describe("gateway env builders consult the secrets provider", () => {
     delete process.env.ANTHROPIC_API_KEY;
     delete process.env.ANHEPRO_API_KEY;
   });
+
+  it("declares the Windows Desktop gateway as externally supervised", () => {
+    const originalSupervisor = process.env.HERMES_GATEWAY_EXTERNAL_SUPERVISOR;
+    const platform = vi
+      .spyOn(process, "platform", "get")
+      .mockReturnValue("win32");
+    delete process.env.HERMES_GATEWAY_EXTERNAL_SUPERVISOR;
+    try {
+      expect(buildGatewayEnv().HERMES_GATEWAY_EXTERNAL_SUPERVISOR).toBe("1");
+    } finally {
+      platform.mockRestore();
+      if (originalSupervisor === undefined) {
+        delete process.env.HERMES_GATEWAY_EXTERNAL_SUPERVISOR;
+      } else {
+        process.env.HERMES_GATEWAY_EXTERNAL_SUPERVISOR = originalSupervisor;
+      }
+    }
+  });
   afterEach(() => {
     if (savedKey === undefined) delete process.env.ANTHROPIC_API_KEY;
     else process.env.ANTHROPIC_API_KEY = savedKey;

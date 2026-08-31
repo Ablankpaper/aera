@@ -4253,6 +4253,18 @@ export function buildGatewayEnv(
   // upstream learns to read `api_server.token` directly.
   gatewayEnv.API_SERVER_KEY = apiServerKey;
 
+  // Electron owns this child on Windows: it records the launch identity,
+  // gates readiness, and performs the bounded teardown. Runtime's
+  // supervised-gateway conflict guard is for systemd/launchd/s6 hosts; its
+  // Windows fallback needlessly scans the process ancestry before the
+  // Gateway can initialize (the packaged boundary trace showed it blocking
+  // in psutil.Process.ppid()). Use Runtime's existing external-supervisor
+  // contract so that guard is skipped without bypassing Desktop ownership or
+  // readiness validation.
+  if (process.platform === "win32") {
+    gatewayEnv.HERMES_GATEWAY_EXTERNAL_SUPERVISOR = "1";
+  }
+
   return gatewayEnv;
 }
 
