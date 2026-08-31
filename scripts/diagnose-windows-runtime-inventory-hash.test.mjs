@@ -6,6 +6,7 @@ import {
   extractedRuntimeDestination,
   parseFileEvents,
   parseConcurrencyList,
+  productionRuntimeLayout,
   summarizeHashEvents,
 } from "./diagnose-windows-runtime-inventory-hash.mjs";
 
@@ -14,6 +15,13 @@ test("walks the archive root that the sequential extractor materializes", () => 
     extractedRuntimeDestination("C:\\runner\\temp\\extracted"),
     "C:\\runner\\temp\\extracted\\agentera-runtime",
   );
+});
+
+test("models the production payload and zip-extracting rename boundary", () => {
+  assert.deepEqual(productionRuntimeLayout("C:\\runner\\temp\\seed-1"), {
+    target: "C:\\runner\\temp\\seed-1\\payload",
+    extractionDestination: "C:\\runner\\temp\\seed-1\\payload.zip-extracting",
+  });
 });
 
 test("supports disabling per-file events for a production-equivalent probe", () => {

@@ -302,7 +302,8 @@ absolute diagnostic sink is present; the production parent never forwards it,
 so normal verification behavior and its Windows default remain unchanged.
 The sequential extractor materializes the archive's `agentera-runtime` root
 below its requested destination, so the probe passes that materialized root to
-the inventory helper and snapshots it separately from the extraction parent.
+the inventory helper and then performs the same `payload.zip-extracting` →
+`payload` rename as production before hashing.
 The `--file-events disabled` mode omits the synchronous per-file sink and is
 the production-equivalent scheduling control; the default enabled mode is kept
 for path-free file lifecycle evidence.

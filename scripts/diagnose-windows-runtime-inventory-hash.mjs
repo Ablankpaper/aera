@@ -16,6 +16,7 @@ import {
   mkdtemp,
   readFile,
   readdir,
+  rename,
   rm,
   stat,
   writeFile,
@@ -540,6 +541,14 @@ export function extractedRuntimeDestination(extractionDestination) {
   return path.win32.join(extractionDestination, "agentera-runtime");
 }
 
+export function productionRuntimeLayout(runRoot) {
+  const target = path.win32.join(runRoot, "payload");
+  return {
+    target,
+    extractionDestination: `${target}.zip-extracting`,
+  };
+}
+
 async function writeRequest(filePath, value) {
   await writeFile(filePath, `${JSON.stringify(value)}\n`, {
     flag: "wx",
@@ -594,10 +603,8 @@ async function parentMain(values) {
   const runRoot = await mkdtemp(
     path.join(tmpdir(), "aera-runtime-inventory-hash-diagnostic-"),
   );
-  const extractionDestination = path.join(runRoot, "extracted");
-  const inventoryDestination = extractedRuntimeDestination(
-    extractionDestination,
-  );
+  const { target: inventoryDestination, extractionDestination } =
+    productionRuntimeLayout(runRoot);
   await mkdir(extractionDestination, { recursive: true, mode: 0o700 });
   const privateValues = [
     electronPath,
@@ -658,6 +665,19 @@ async function parentMain(values) {
     if (extraction.outcome !== "complete" || !extractionResult.ok) {
       throw new Error("sequential extraction did not complete");
     }
+    const extractedChildren = await readdir(extractionDestination);
+    if (
+      extractedChildren.length !== 1 ||
+      extractedChildren[0] !== "agentera-runtime"
+    ) {
+      throw new Error("sequential extraction produced an unexpected layout");
+    }
+    await rename(
+      extractedRuntimeDestination(extractionDestination),
+      inventoryDestination,
+    );
+    await rm(extractionDestination, { recursive: true, force: true });
+    emit("inventory-layout-complete");
 
     for (const concurrency of concurrencyList) {
       const name = `inventory-hash-${concurrency}`;
