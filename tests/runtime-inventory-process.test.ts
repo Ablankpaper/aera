@@ -64,6 +64,9 @@ describe("isolated Runtime inventory verification", () => {
           SystemRoot: "C:\\Windows",
         });
         expect(options.env.OPENAI_API_KEY).toBeUndefined();
+        expect(
+          options.env.AERA_RUNTIME_INVENTORY_HASH_CONCURRENCY,
+        ).toBeUndefined();
         expect(options.windowsHide).toBe(true);
         return {
           stdout: `${JSON.stringify({
@@ -121,6 +124,7 @@ describe("isolated Runtime inventory verification", () => {
         WINDIR: "C:\\Windows",
         TEMP: "C:\\Temp",
         TMP: "C:\\Temp",
+        AERA_RUNTIME_INVENTORY_HASH_CONCURRENCY: "1",
         ComSpec: "C:\\Windows\\System32\\cmd.exe",
         PATHEXT: ".COM;.EXE",
         NODE_OPTIONS: "--inspect",

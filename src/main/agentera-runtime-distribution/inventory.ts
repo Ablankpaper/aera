@@ -81,6 +81,19 @@ interface RuntimeHashBatchProgress {
 
 type RuntimeHashBatchObserver = (progress: RuntimeHashBatchProgress) => void;
 
+export interface RuntimeHashFileDiagnostic {
+  phase: "start" | "complete" | "error";
+  fileIndex: number;
+  size?: number;
+  relativePathSha256: string;
+  durationMs?: number;
+  errorName?: string;
+}
+
+export type RuntimeHashFileObserver = (
+  event: RuntimeHashFileDiagnostic,
+) => void;
+
 export type RuntimeFileHasher = (
   path: string,
   signal?: AbortSignal,
@@ -125,6 +138,18 @@ function emitHashBatchProgress(
   if (!observer) return;
   try {
     observer(progress);
+  } catch {
+    // Diagnostic evidence must never change Runtime verification behavior.
+  }
+}
+
+function emitHashFileDiagnostic(
+  observer: RuntimeHashFileObserver | undefined,
+  event: RuntimeHashFileDiagnostic,
+): void {
+  if (!observer) return;
+  try {
+    observer(event);
   } catch {
     // Diagnostic evidence must never change Runtime verification behavior.
   }
@@ -358,6 +383,7 @@ export async function verifyRuntimeFileHashes(
   fileHasher: RuntimeFileHasher = hashFile,
   concurrency = RUNTIME_HASH_CONCURRENCY,
   observer?: RuntimeHashBatchObserver,
+  fileObserver?: RuntimeHashFileObserver,
 ): Promise<void> {
   if (!Number.isSafeInteger(concurrency) || concurrency < 1) {
     throw new RuntimeExtractionError(
@@ -408,6 +434,16 @@ export async function verifyRuntimeFileHashes(
       }
       if (index >= checks.length) return;
       const check = checks[index];
+      const fileStartedAt = Date.now();
+      const relativePathSha256 = createHash("sha256")
+        .update(check.relativePath)
+        .digest("hex");
+      emitHashFileDiagnostic(fileObserver, {
+        phase: "start",
+        fileIndex: index,
+        ...(check.size === undefined ? {} : { size: check.size }),
+        relativePathSha256,
+      });
       try {
         if (
           (await fileHasher(check.physicalPath, signal, check.size)) !==
@@ -418,12 +454,27 @@ export async function verifyRuntimeFileHashes(
           );
         }
       } catch (error) {
+        emitHashFileDiagnostic(fileObserver, {
+          phase: "error",
+          fileIndex: index,
+          ...(check.size === undefined ? {} : { size: check.size }),
+          relativePathSha256,
+          durationMs: Math.max(0, Date.now() - fileStartedAt),
+          errorName: error instanceof Error ? error.name : "unknown",
+        });
         if (!hasFailure) {
           hasFailure = true;
           firstFailure = error;
         }
         return;
       }
+      emitHashFileDiagnostic(fileObserver, {
+        phase: "complete",
+        fileIndex: index,
+        ...(check.size === undefined ? {} : { size: check.size }),
+        relativePathSha256,
+        durationMs: Math.max(0, Date.now() - fileStartedAt),
+      });
       completedFileCount += 1;
       reportProgress();
     }
@@ -452,6 +503,8 @@ export async function verifyExtractedRuntimeInventoryInProcess(
   hostPlatform: NodeJS.Platform = process.platform,
   fileSystem?: RuntimeInventoryFileSystem,
   diagnosticObserver?: RuntimeInventoryDiagnosticObserver,
+  hashConcurrencyOverride?: number,
+  hashFileObserver?: RuntimeHashFileObserver,
 ): Promise<RuntimeExtractionResult> {
   const walkStartedAt = Date.now();
   emitInventoryDiagnostic(diagnosticObserver, {
@@ -660,9 +713,10 @@ export async function verifyExtractedRuntimeInventoryInProcess(
     extractedBytes,
   });
   const hashConcurrency =
-    hostPlatform === "win32"
+    hashConcurrencyOverride ??
+    (hostPlatform === "win32"
       ? RUNTIME_WINDOWS_HASH_CONCURRENCY
-      : RUNTIME_HASH_CONCURRENCY;
+      : RUNTIME_HASH_CONCURRENCY);
   const hashStartedAt = Date.now();
   emitInventoryDiagnostic(diagnosticObserver, {
     event: "inventory-hash-start",
@@ -691,6 +745,7 @@ export async function verifyExtractedRuntimeInventoryInProcess(
         elapsedMs: Math.max(0, Date.now() - hashStartedAt),
         ...progress,
       }),
+    hashFileObserver,
   );
   emitInventoryDiagnostic(diagnosticObserver, {
     event: "inventory-hash-complete",

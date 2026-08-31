@@ -4,6 +4,7 @@ import { isAbsolute } from "node:path";
 
 import {
   verifyExtractedRuntimeInventoryInProcess,
+  type RuntimeHashFileDiagnostic,
   type RuntimeInventoryDiagnosticEvent,
 } from "./agentera-runtime-distribution/inventory";
 import {
@@ -14,6 +15,12 @@ import {
 
 const MAX_REQUEST_BYTES = 32 * 1024 * 1024;
 const DIAGNOSTIC_OUTPUT = "AGENTERA_RUNTIME_INVENTORY_DIAGNOSTIC_OUTPUT";
+// This control is intentionally not included in the production parent
+// environment allowlist.  It is consumed only when an explicit absolute
+// diagnostic sink is present, so an ambient user environment cannot alter the
+// production inventory verifier.
+const DIAGNOSTIC_HASH_CONCURRENCY = "AERA_RUNTIME_INVENTORY_HASH_CONCURRENCY";
+const MAX_DIAGNOSTIC_HASH_CONCURRENCY = 128;
 const EXPECTED_REQUEST_FIELDS = new Set([
   "schemaVersion",
   "destination",
@@ -51,6 +58,51 @@ function helperDiagnostic(
   } catch {
     // Diagnostic evidence must never change Runtime installation behavior.
   }
+}
+
+function diagnosticOutputPath(): string | undefined {
+  const outputPath = process.env[DIAGNOSTIC_OUTPUT]?.trim();
+  return outputPath && isAbsolute(outputPath) ? outputPath : undefined;
+}
+
+function diagnosticHashConcurrency(): number | undefined {
+  // Never honor the override unless the helper is already writing explicit
+  // diagnostic evidence.  The normal packaged installation therefore keeps
+  // its signed/default concurrency regardless of inherited environment data.
+  if (!diagnosticOutputPath()) return undefined;
+  const raw = process.env[DIAGNOSTIC_HASH_CONCURRENCY]?.trim();
+  if (!raw) return undefined;
+  const value = Number(raw);
+  if (
+    !Number.isSafeInteger(value) ||
+    value < 1 ||
+    value > MAX_DIAGNOSTIC_HASH_CONCURRENCY
+  ) {
+    throw new Error("invalid diagnostic hash concurrency");
+  }
+  return value;
+}
+
+function diagnosticHashFileObserver(
+  enabled: boolean,
+): ((event: RuntimeHashFileDiagnostic) => void) | undefined {
+  if (!enabled || !diagnosticOutputPath()) return undefined;
+  return ({
+    phase,
+    fileIndex,
+    size,
+    relativePathSha256,
+    durationMs,
+    errorName,
+  }) => {
+    helperDiagnostic(`inventory-hash-file-${phase}`, {
+      fileIndex,
+      relativePathSha256,
+      ...(size === undefined ? {} : { size }),
+      ...(durationMs === undefined ? {} : { durationMs }),
+      ...(errorName === undefined ? {} : { errorName }),
+    });
+  };
 }
 
 function parseRequest(value: unknown): RuntimeInventoryHelperRequest {
@@ -108,10 +160,14 @@ async function main(): Promise<void> {
   helperDiagnostic("inventory-helper-request-complete");
   helperDiagnostic("inventory-walk-hash-start");
   const startedAt = Date.now();
-  const diagnosticObserver = process.env[DIAGNOSTIC_OUTPUT]?.trim()
+  const diagnosticObserver = diagnosticOutputPath()
     ? ({ event, ...fields }: RuntimeInventoryDiagnosticEvent) =>
         helperDiagnostic(event, fields)
     : undefined;
+  const hashConcurrency = diagnosticHashConcurrency();
+  const hashFileObserver = diagnosticHashFileObserver(
+    hashConcurrency !== undefined,
+  );
   const result = await verifyExtractedRuntimeInventoryInProcess(
     request.destination,
     request.manifest,
@@ -120,6 +176,8 @@ async function main(): Promise<void> {
     request.hostPlatform,
     undefined,
     diagnosticObserver,
+    hashConcurrency,
+    hashFileObserver,
   );
   helperDiagnostic("inventory-walk-hash-complete", {
     durationMs: Math.max(0, Date.now() - startedAt),

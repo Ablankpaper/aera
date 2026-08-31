@@ -262,4 +262,29 @@ describe("CI workflow policy", () => {
     );
     expect(workflow).not.toContain("publish-desktop-update");
   });
+
+  it("keeps the Windows inventory hash probe isolated from release paths", () => {
+    const workflow = readFileSync(
+      resolve(
+        ".github/workflows/beta38-windows-runtime-inventory-hash-diagnostic.yml",
+      ),
+      "utf8",
+    );
+    expect(workflow).toContain(
+      "scripts/diagnose-windows-runtime-inventory-hash.mjs",
+    );
+    expect(
+      readFileSync(
+        resolve("scripts/diagnose-windows-runtime-inventory-hash.mjs"),
+        "utf8",
+      ),
+    ).toContain("AERA_RUNTIME_INVENTORY_HASH_CONCURRENCY");
+    expect(workflow).toContain("actions/upload-artifact@v4");
+    expect(workflow).toContain("--win dir --x64 --publish never");
+    expect(workflow).toContain("timeout-minutes: 90");
+    expect(workflow).not.toContain("environment: internal-beta");
+    expect(workflow).not.toContain("secrets.");
+    expect(workflow).not.toContain("internal-beta-promote.yml");
+    expect(workflow).not.toContain("publish-desktop-update");
+  });
 });

@@ -182,6 +182,46 @@ it("continues dispatching hashes when one worker remains pending", async () => {
   await expect(verification).resolves.toBeUndefined();
 });
 
+it("reports each hash worker file lifecycle to the diagnostic observer", async () => {
+  const { verifyRuntimeFileHashes } =
+    await import("../src/main/agentera-runtime-distribution/extractor");
+  const checks = [
+    {
+      physicalPath: "/runtime/file.bin",
+      relativePath: "file.bin",
+      expectedSha256: "a".repeat(64),
+      size: 7,
+    },
+  ];
+  const events: Record<string, unknown>[] = [];
+
+  await expect(
+    verifyRuntimeFileHashes(
+      checks,
+      undefined,
+      async () => "a".repeat(64),
+      1,
+      undefined,
+      (event) => events.push(event),
+    ),
+  ).resolves.toBeUndefined();
+  expect(events).toEqual([
+    expect.objectContaining({
+      phase: "start",
+      fileIndex: 0,
+      size: 7,
+      relativePathSha256: createHash("sha256").update("file.bin").digest("hex"),
+    }),
+    expect.objectContaining({
+      phase: "complete",
+      fileIndex: 0,
+      size: 7,
+      relativePathSha256: createHash("sha256").update("file.bin").digest("hex"),
+      durationMs: expect.any(Number),
+    }),
+  ]);
+});
+
 it("bounds hash progress evidence to checkpoints and the final batch", async () => {
   const { verifyRuntimeFileHashes } =
     await import("../src/main/agentera-runtime-distribution/extractor");
@@ -257,6 +297,66 @@ it("uses a higher bounded hash pool for a Windows Runtime inventory", async () =
       extractedBytes: contents.length * entries.length,
     });
     expect(maximum).toBe(32);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+it("allows diagnostics to override the Windows hash pool without changing checks", async () => {
+  const { verifyExtractedRuntimeInventoryInProcess } =
+    await import("../src/main/agentera-runtime-distribution/inventory");
+  const root = await mkdtemp(
+    join(tmpdir(), "aera-runtime-diagnostic-hash-pool-"),
+  );
+  const contents = Buffer.from("diagnostic Runtime entry");
+  const entries = Array.from({ length: 4 }, (_, index) => ({
+    path: `runtime-${index}.bin`,
+    kind: "file" as const,
+    size: contents.length,
+    sha256: createHash("sha256").update(contents).digest("hex"),
+    mode: 0o644,
+    link_target: null,
+  }));
+  await Promise.all(
+    entries.map((entry) => writeFile(join(root, entry.path), contents)),
+  );
+  let active = 0;
+  let maximum = 0;
+  const readFilePath = vi.fn(async (path: string) => {
+    active += 1;
+    maximum = Math.max(maximum, active);
+    try {
+      return await readFile(path);
+    } finally {
+      active -= 1;
+    }
+  });
+
+  try {
+    await expect(
+      verifyExtractedRuntimeInventoryInProcess(
+        root,
+        { platform: "windows", files: entries } as RuntimeManifest,
+        contents.length * entries.length,
+        undefined,
+        "win32",
+        {
+          chmod,
+          lstat,
+          open,
+          readFile: readFilePath as typeof readFile,
+          readlink,
+          readdir,
+          realpath,
+        } satisfies RuntimeInventoryFileSystem,
+        undefined,
+        1,
+      ),
+    ).resolves.toEqual({
+      fileCount: entries.length,
+      extractedBytes: contents.length * entries.length,
+    });
+    expect(maximum).toBe(1);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

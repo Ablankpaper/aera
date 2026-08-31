@@ -287,6 +287,22 @@ process snapshots are retained as evidence. A failure is expected diagnostic
 evidence, not a release gate bypass: the installer, Gateway, candidate,
 signing, promotion, and publication paths remain out of scope.
 
+##### Windows inventory hash boundary diagnostic
+
+The inventory hash probe compares bounded hash-pool sizes on one extracted Windows Seed.
+
+It first extracts the exact packaged Windows Seed once through the sequential
+extraction helper, then invokes the shipped inventory helper against that
+unchanged tree with explicit hash-pool sizes (32, 8, 4, and 1 by default).
+`scripts/diagnose-windows-runtime-inventory-hash.mjs` keeps each run
+credential-free and records path-free walk/hash phase events plus a per-file
+start/complete/error timeline. The diagnostic-only
+`AERA_RUNTIME_INVENTORY_HASH_CONCURRENCY` control is honored only when an
+absolute diagnostic sink is present; the production parent never forwards it,
+so normal verification behavior and its Windows default remain unchanged.
+Timeouts terminate the helper before the evidence snapshot and leave the
+pending file indices and redacted process sample in the uploaded artifact.
+
 #### Health child-process lifecycle evidence
 
 When diagnostics are enabled, each isolated health probe records its child lifecycle and timeout state so a packaged stall can be classified from evidence rather than timing assumptions.
