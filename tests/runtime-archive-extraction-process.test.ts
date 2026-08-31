@@ -51,6 +51,7 @@ it("starts the packaged executable in credential-free Node mode and removes its 
       expect(options.env).toMatchObject({
         ELECTRON_RUN_AS_NODE: "1",
         AGENTERA_RUNTIME_ARCHIVE_EXTRACTION_HELPER: "1",
+        AGENTERA_RUNTIME_ARCHIVE_EXTRACTION_MODE: "sequential",
         SystemRoot: "C:\\Windows",
       });
       expect(options.env.OPENAI_API_KEY).toBeUndefined();
@@ -108,6 +109,7 @@ it("passes only the minimum Windows process environment", () => {
   ).toEqual({
     ELECTRON_RUN_AS_NODE: "1",
     AGENTERA_RUNTIME_ARCHIVE_EXTRACTION_HELPER: "1",
+    AGENTERA_RUNTIME_ARCHIVE_EXTRACTION_MODE: "sequential",
     SystemRoot: "C:\\Windows",
     WINDIR: "C:\\Windows",
     TEMP: "C:\\Temp",

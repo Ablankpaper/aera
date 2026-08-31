@@ -36,6 +36,7 @@ const execFileAsync = promisify(execFile);
 const EXTRACTION_MARKER = "AGENTERA_RUNTIME_ARCHIVE_EXTRACTION_HELPER";
 const VALIDATION_MARKER = "AGENTERA_RUNTIME_ARCHIVE_VALIDATION_HELPER";
 const DIAGNOSTIC_OUTPUT = "AGENTERA_RUNTIME_INVENTORY_DIAGNOSTIC_OUTPUT";
+const EXTRACTION_MODE = "AGENTERA_RUNTIME_ARCHIVE_EXTRACTION_MODE";
 const MODULE_OVERRIDE = "AGENTERA_RUNTIME_EXTRACT_ZIP_MODULE_PATH";
 const SHIM_OUTPUT = "AERA_EXTRACTION_SHIM_OUTPUT";
 const SHIM_REAL_MODULE = "AERA_EXTRACTION_REAL_MODULE_PATH";
@@ -167,10 +168,16 @@ function copySafeWindowsEnvironment(source) {
 }
 
 /** Match buildRuntimeArchiveExtractionHelperEnvironment exactly. */
-function productionHelperEnvironment(source, marker, outputPath) {
+function productionHelperEnvironment(
+  source,
+  marker,
+  outputPath,
+  extractionMode = "sequential",
+) {
   const result = {
     ELECTRON_RUN_AS_NODE: "1",
     [marker]: "1",
+    [EXTRACTION_MODE]: extractionMode,
   };
   for (const key of ["SystemRoot", "WINDIR", "TEMP", "TMP"]) {
     const value = envValue(source, key);
@@ -495,6 +502,7 @@ async function runHelperVariant({
   privateValues,
   executionMode = "plain",
   directoryMode = "default",
+  extractionMode = "sequential",
 }) {
   const variantRoot = path.join(root, name);
   const destination = path.join(
@@ -524,6 +532,7 @@ async function runHelperVariant({
           sourceEnvironment,
           EXTRACTION_MARKER,
           eventsPath,
+          extractionMode,
         );
   if (moduleOverride) {
     env[MODULE_OVERRIDE] = moduleOverride.path;
@@ -543,6 +552,7 @@ async function runHelperVariant({
     moduleOverride: Boolean(moduleOverride),
     executionMode,
     directoryMode,
+    extractionMode,
     timeoutMs,
   });
   const execution = executionOptions(executionMode, timeoutMs);
@@ -615,6 +625,7 @@ async function runElectronParentVariant({
   parentContext = "none",
   directoryMode = "default",
   modulePath,
+  extractionMode = "sequential",
 }) {
   const variantRoot = path.join(root, name);
   const destination = path.join(
@@ -638,6 +649,7 @@ async function runElectronParentVariant({
     sourceEnvironment,
     EXTRACTION_MARKER,
     eventsPath,
+    extractionMode,
   );
   await writeFile(
     configPath,
@@ -665,6 +677,7 @@ async function runElectronParentVariant({
     executionMode,
     parentContext,
     directoryMode,
+    extractionMode,
     timeoutMs,
   });
   const execution = executionOptions(executionMode, timeoutMs);
@@ -966,6 +979,7 @@ async function parentMain(values) {
         timeoutMs,
         emit,
         environmentMode: "minimal",
+        extractionMode: "native",
         privateValues,
       }),
     );
@@ -981,6 +995,7 @@ async function parentMain(values) {
         timeoutMs,
         emit,
         environmentMode: "extended",
+        extractionMode: "native",
         privateValues,
       }),
     );

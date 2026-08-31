@@ -23,6 +23,7 @@ import {
   shouldEnforceExtractedRuntimeMode,
   verifyExtractedRuntimeInventory,
 } from "../src/main/agentera-runtime-distribution/extractor";
+import { extractRuntimeArchiveSequentially } from "../src/main/agentera-runtime-distribution/sequential-zip-extractor";
 import {
   type RuntimeManifest,
   type RuntimeManifestFile,
@@ -476,6 +477,52 @@ describe("Runtime Seed extractor", () => {
     await expect(
       lstat(join(destination, "agentera-runtime")),
     ).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
+  it("can extract a verified Windows ZIP sequentially", async () => {
+    const root = await workspace();
+    const value = manifest("windows");
+    const archivePath = await writeZip(root, archiveEntries(value.files));
+    const destination = join(root, "payload.zip-extracting");
+    await mkdir(destination, { recursive: false, mode: 0o700 });
+
+    await extractRuntimeArchiveSequentially(archivePath, destination);
+
+    expect(
+      await readFile(
+        join(destination, "agentera-runtime", "runtime", "hermes"),
+        "utf8",
+      ),
+    ).toBe(hermesBody.toString("utf8"));
+    expect(
+      await stat(
+        join(destination, "agentera-runtime", "python", "bin", "python3"),
+      ),
+    ).toMatchObject({ isFile: expect.any(Function) });
+  });
+
+  it("rejects unsafe members before sequential ZIP writes", async () => {
+    const root = await workspace();
+    const value = manifest("windows");
+    const archivePath = await writeZip(
+      root,
+      archiveEntries(value.files, [
+        {
+          name: "agentera-runtime/../escape.txt",
+          kind: "file",
+          body: Buffer.from("escape", "utf8"),
+        },
+      ]),
+    );
+    const destination = join(root, "payload.zip-extracting");
+    await mkdir(destination, { recursive: false, mode: 0o700 });
+
+    await expect(
+      extractRuntimeArchiveSequentially(archivePath, destination),
+    ).rejects.toThrow(/invalid|unsafe|outside|escapes/i);
+    await expect(stat(join(root, "escape.txt"))).rejects.toMatchObject({
       code: "ENOENT",
     });
   });

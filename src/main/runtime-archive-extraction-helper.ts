@@ -4,8 +4,11 @@ import { availableParallelism } from "node:os";
 import { pathToFileURL } from "node:url";
 import { basename, isAbsolute, join, win32 } from "node:path";
 
+import { extractRuntimeArchiveSequentially } from "./agentera-runtime-distribution/sequential-zip-extractor";
+
 const HELPER_MARKER = "AGENTERA_RUNTIME_ARCHIVE_EXTRACTION_HELPER";
 const DIAGNOSTIC_OUTPUT = "AGENTERA_RUNTIME_INVENTORY_DIAGNOSTIC_OUTPUT";
+const EXTRACTOR_MODE = "AGENTERA_RUNTIME_ARCHIVE_EXTRACTION_MODE";
 const MAX_REQUEST_BYTES = 32 * 1024;
 const EXPECTED_REQUEST_FIELDS = new Set([
   "schemaVersion",
@@ -132,8 +135,19 @@ async function main(): Promise<void> {
     throw new Error("invalid extraction destination");
   }
   helperDiagnostic("archive-extraction-helper-load-start");
-  const extract = await loadExtractor();
-  helperDiagnostic("archive-extraction-helper-load-complete");
+  const moduleOverridePath =
+    process.env.AGENTERA_RUNTIME_EXTRACT_ZIP_MODULE_PATH?.trim();
+  const useNativeExtractor =
+    moduleOverridePath !== undefined && moduleOverridePath.length > 0
+      ? true
+      : process.env[EXTRACTOR_MODE]?.trim().toLowerCase() === "native";
+  const extract = useNativeExtractor
+    ? await loadExtractor()
+    : (archivePath: string, options: { dir: string }) =>
+        extractRuntimeArchiveSequentially(archivePath, options.dir);
+  helperDiagnostic("archive-extraction-helper-load-complete", {
+    implementation: useNativeExtractor ? "native" : "sequential",
+  });
   const startedAt = Date.now();
   const startedCpu = process.cpuUsage();
   helperDiagnostic("archive-extraction-helper-extract-start");

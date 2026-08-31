@@ -56,6 +56,7 @@ win:
       to: runtime-archive-extraction-helper
       filter:
         - "runtime-archive-extraction-helper.js"
+        - "chunks/index-*.js"
   files:
     - "!node_modules/@electron-internal/extract-zip/index.darwin-*.node"
     - "!node_modules/@electron-internal/extract-zip/index.linux-*.node"

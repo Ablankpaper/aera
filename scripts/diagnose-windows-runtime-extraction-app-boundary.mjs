@@ -17,6 +17,7 @@ import { dirname, join, win32 } from "node:path";
 
 const HELPER_MARKER = "AGENTERA_RUNTIME_ARCHIVE_EXTRACTION_HELPER";
 const DIAGNOSTIC_OUTPUT = "AGENTERA_RUNTIME_INVENTORY_DIAGNOSTIC_OUTPUT";
+const EXTRACTION_MODE = "AGENTERA_RUNTIME_ARCHIVE_EXTRACTION_MODE";
 const DEFAULT_TIMEOUT_MS = 90_000;
 
 function parsePositiveInteger(value, name) {
@@ -154,6 +155,9 @@ function makeProbeEnvironment(source) {
   const result = {
     ELECTRON_RUN_AS_NODE: "1",
     [HELPER_MARKER]: "1",
+    // Match buildRuntimeArchiveExtractionHelperEnvironment. Native remains
+    // available as an explicit diagnostic/module-override control.
+    [EXTRACTION_MODE]: "sequential",
   };
   for (const key of ["SystemRoot", "WINDIR", "TEMP", "TMP"]) {
     const value = Object.entries(source ?? {}).find(

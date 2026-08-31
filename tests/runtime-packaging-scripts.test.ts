@@ -408,7 +408,7 @@ describe("Runtime Seed packaging scripts", () => {
       {
         from: "out/main",
         to: "runtime-archive-extraction-helper",
-        filter: ["runtime-archive-extraction-helper.js"],
+        filter: ["runtime-archive-extraction-helper.js", "chunks/index-*.js"],
       },
     ]);
     expect(config.files).toEqual([
