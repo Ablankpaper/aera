@@ -124,22 +124,37 @@ async function runInApplication({
         {
           name: "app-user-data-noasar",
           noAsar: true,
+          launchMode: "exec-file",
           destinationRoot: probeRoot,
         },
         {
           name: "app-user-data-plain",
           noAsar: false,
+          launchMode: "exec-file",
           destinationRoot: probeRoot,
         },
         {
           name: "app-temp-noasar",
           noAsar: true,
+          launchMode: "exec-file",
           destinationRoot: pathModule.join(
             await fs.mkdtemp(
               pathModule.join(os.tmpdir(), "aera-app-temp-probe-"),
             ),
             "runtime",
           ),
+        },
+        {
+          name: "app-user-data-noasar-spawn",
+          noAsar: true,
+          launchMode: "spawn",
+          destinationRoot: probeRoot,
+        },
+        {
+          name: "app-user-data-noasar-exec-no-options",
+          noAsar: true,
+          launchMode: "exec-file-no-options",
+          destinationRoot: probeRoot,
         },
       ];
       const results = [];
@@ -184,6 +199,8 @@ async function runInApplication({
             let child;
             let settled = false;
             let timer;
+            let stdout = "";
+            let stderr = "";
             const finish = (value) => {
               if (settled) return;
               settled = true;
@@ -208,41 +225,87 @@ async function runInApplication({
                 // Best-effort diagnostic cleanup.
               }
             };
+            const complete = (errorCode, signal) => {
+              finish({
+                outcome: errorCode || signal ? "failed" : "complete",
+                errorCode: errorCode ?? null,
+                signal: signal ?? null,
+                stdout: stdout.slice(-32_768),
+                stderr: stderr.slice(-32_768),
+                childPid: child?.pid ?? null,
+                durationMs: Date.now() - startedAt,
+              });
+            };
             try {
-              child = childProcess.execFile(
-                process.execPath,
-                [config.helperPath, requestPath],
-                {
+              if (variant.launchMode === "spawn") {
+                child = childProcess.spawn(
+                  process.execPath,
+                  [config.helperPath, requestPath],
+                  {
+                    env: environment,
+                    windowsHide: true,
+                    stdio: ["ignore", "pipe", "pipe"],
+                  },
+                );
+                child.stdout?.on("data", (chunk) => {
+                  stdout += String(chunk);
+                });
+                child.stderr?.on("data", (chunk) => {
+                  stderr += String(chunk);
+                });
+                child.once("error", (error) =>
+                  finish({
+                    outcome: "spawn-error",
+                    errorCode: error?.code ?? "spawn-error",
+                    signal: null,
+                    stdout: stdout.slice(-32_768),
+                    stderr: `${stderr}${String(error?.message ?? "")}`.slice(
+                      -32_768,
+                    ),
+                    childPid: child?.pid ?? null,
+                    durationMs: Date.now() - startedAt,
+                  }),
+                );
+                child.once("close", (code, signal) =>
+                  complete(code === 0 ? null : code, signal),
+                );
+              } else {
+                const options = {
                   encoding: "utf8",
                   env: environment,
                   windowsHide: true,
-                  timeout: config.timeoutMs,
-                  killSignal: "SIGTERM",
                   maxBuffer: 64 * 1024,
-                },
-                (error, stdout, stderr) => {
+                  ...(variant.launchMode === "exec-file"
+                    ? {
+                        timeout: config.timeoutMs,
+                        killSignal: "SIGTERM",
+                      }
+                    : {}),
+                };
+                child = childProcess.execFile(
+                  process.execPath,
+                  [config.helperPath, requestPath],
+                  options,
+                  (error, output, errorOutput) => {
+                    stdout = String(output ?? "");
+                    stderr = String(errorOutput ?? "");
+                    complete(error?.code ?? null, error?.signal ?? null);
+                  },
+                );
+                child.once("error", (error) =>
                   finish({
-                    outcome: error ? "failed" : "complete",
-                    errorCode: error?.code ?? null,
-                    signal: error?.signal ?? null,
-                    stdout: String(stdout ?? "").slice(-32_768),
-                    stderr: String(stderr ?? "").slice(-32_768),
+                    outcome: "spawn-error",
+                    errorCode: error?.code ?? "spawn-error",
+                    signal: null,
+                    stdout: stdout.slice(-32_768),
+                    stderr: `${stderr}${String(error?.message ?? "")}`.slice(
+                      -32_768,
+                    ),
                     childPid: child?.pid ?? null,
                     durationMs: Date.now() - startedAt,
-                  });
-                },
-              );
-              child.once("error", (error) =>
-                finish({
-                  outcome: "spawn-error",
-                  errorCode: error?.code ?? "spawn-error",
-                  signal: null,
-                  stdout: "",
-                  stderr: String(error?.message ?? ""),
-                  childPid: child?.pid ?? null,
-                  durationMs: Date.now() - startedAt,
-                }),
-              );
+                  }),
+                );
+              }
               timer = setTimeout(() => {
                 terminate();
                 finish({
@@ -289,6 +352,7 @@ async function runInApplication({
           results.push({
             name: variant.name,
             noAsar: variant.noAsar,
+            launchMode: variant.launchMode,
             appUserDataLength: appUserData.length,
             appUserDataRoot: pathModule.parse(appUserData).root,
             destinationLength: destination.length,
@@ -354,6 +418,7 @@ async function main() {
   await writeFile(outputPath, "", { flag: "w", mode: 0o600 });
   emit(outputPath, "app-diagnostic-start", {
     timeoutMs,
+    variants: 5,
     helper: redactedShape(helper, [electronPath, resourcesPath, archivePath]),
   });
   const temporaryRoot = await mkdtemp(

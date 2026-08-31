@@ -130,7 +130,17 @@ async function main(): Promise<void> {
   helperDiagnostic("archive-extraction-helper-load-complete");
   const startedAt = Date.now();
   helperDiagnostic("archive-extraction-helper-extract-start");
-  await extract(request.archivePath, { dir: request.destination });
+  const heartbeat = setInterval(() => {
+    helperDiagnostic("archive-extraction-helper-extract-heartbeat", {
+      durationMs: Math.max(0, Date.now() - startedAt),
+    });
+  }, 5_000);
+  heartbeat.unref?.();
+  try {
+    await extract(request.archivePath, { dir: request.destination });
+  } finally {
+    clearInterval(heartbeat);
+  }
   helperDiagnostic("archive-extraction-helper-result-written", {
     durationMs: Math.max(0, Date.now() - startedAt),
   });
