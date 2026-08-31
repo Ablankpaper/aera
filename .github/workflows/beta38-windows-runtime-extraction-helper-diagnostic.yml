@@ -121,6 +121,24 @@ jobs:
             --timeout-ms 90000
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Run helper from the real packaged Aera main process
+        shell: pwsh
+        run: |
+          $unpacked = @(Get-ChildItem dist -Directory | Where-Object { $_.Name -like '*unpacked' })
+          if ($unpacked.Count -ne 1) { throw 'Expected exactly one unpacked Windows app' }
+          $app = $unpacked[0].FullName
+          $resources = Join-Path $app 'resources'
+          $packagedArchive = @(Get-ChildItem (Join-Path $resources 'agentera-runtime-seed') -File -Filter '*.zip')
+          if ($packagedArchive.Count -ne 1) { throw 'Expected one packaged Runtime archive' }
+          $evidence = Join-Path $env:RUNNER_TEMP 'beta38-windows-runtime-extraction-helper-diagnostic'
+          node scripts/diagnose-windows-runtime-extraction-app-boundary.mjs `
+            --electron (Join-Path $app 'Aera.exe') `
+            --resources $resources `
+            --archive $packagedArchive[0].FullName `
+            --output (Join-Path $evidence 'packaged-app-boundary.jsonl') `
+            --timeout-ms 45000
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Summarize helper boundary evidence
         if: ${{ always() }}
         shell: pwsh
