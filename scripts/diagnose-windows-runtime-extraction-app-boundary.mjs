@@ -463,6 +463,7 @@ async function runInApplication({
       helperPath: helperPath(resourcesPath),
       helperEnvironment: makeProbeEnvironment(process.env),
       diagnosticOutputName: DIAGNOSTIC_OUTPUT,
+      noOpModulePath,
       timeoutMs,
     },
   );
