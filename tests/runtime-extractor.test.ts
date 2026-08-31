@@ -4,6 +4,7 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  readlink,
   rm,
   stat,
   writeFile,
@@ -570,6 +571,29 @@ describe("Runtime Seed extractor", () => {
     await expect(
       extractRuntimeArchiveSequentially(archivePath, destination),
     ).rejects.toThrow(/symlink|target|invalid/i);
+  });
+
+  it("creates a sequential ZIP symlink only after validating its target", async () => {
+    const root = await workspace();
+    const value = manifest("windows");
+    const archivePath = await writeZip(
+      root,
+      archiveEntries(value.files, [
+        {
+          name: "agentera-runtime/runtime/current",
+          kind: "symlink",
+          linkTarget: "hermes",
+        },
+      ]),
+    );
+    const destination = join(root, "payload.zip-extracting");
+    await mkdir(destination, { recursive: false, mode: 0o700 });
+
+    await extractRuntimeArchiveSequentially(archivePath, destination);
+
+    await expect(
+      readlink(join(destination, "agentera-runtime", "runtime", "current")),
+    ).resolves.toBe("hermes");
   });
 
   it("bypasses Electron ASAR interception for Windows extraction and restores it", async () => {
