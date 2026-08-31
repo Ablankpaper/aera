@@ -522,6 +522,10 @@ function helperPaths(resourcesPath) {
   };
 }
 
+export function extractedRuntimeDestination(extractionDestination) {
+  return path.win32.join(extractionDestination, "agentera-runtime");
+}
+
 async function writeRequest(filePath, value) {
   await writeFile(filePath, `${JSON.stringify(value)}\n`, {
     flag: "wx",
@@ -575,15 +579,19 @@ async function parentMain(values) {
   const runRoot = await mkdtemp(
     path.join(tmpdir(), "aera-runtime-inventory-hash-diagnostic-"),
   );
-  const destination = path.join(runRoot, "extracted", "agentera-runtime");
-  await mkdir(destination, { recursive: true, mode: 0o700 });
+  const extractionDestination = path.join(runRoot, "extracted");
+  const inventoryDestination = extractedRuntimeDestination(
+    extractionDestination,
+  );
+  await mkdir(extractionDestination, { recursive: true, mode: 0o700 });
   const privateValues = [
     electronPath,
     resourcesPath,
     archivePath,
     manifestPath,
     runRoot,
-    destination,
+    extractionDestination,
+    inventoryDestination,
   ];
   const results = [];
   let extraction = null;
@@ -606,7 +614,7 @@ async function parentMain(values) {
     await writeRequest(extractionRequestPath, {
       schemaVersion: 1,
       archivePath,
-      destination,
+      destination: extractionDestination,
       hostPlatform: "win32",
     });
     emit("extraction-start", { timeoutMs });
@@ -618,7 +626,7 @@ async function parentMain(values) {
       timeoutMs,
       privateValues,
     });
-    const extractionSnapshot = await walkSnapshot(destination);
+    const extractionSnapshot = await walkSnapshot(extractionDestination);
     const extractionEvents = await readJsonLines(extractionEventsPath);
     const extractionResult = parseHelperResult(extraction.stdoutTail);
     emit("extraction-complete", {
@@ -643,7 +651,7 @@ async function parentMain(values) {
       await writeFile(eventsPath, "", { flag: "w", mode: 0o600 });
       await writeRequest(requestPath, {
         schemaVersion: 1,
-        destination,
+        destination: inventoryDestination,
         manifest,
         maxExtractedBytes,
         hostPlatform: "win32",
@@ -661,7 +669,7 @@ async function parentMain(values) {
         timeoutMs,
         privateValues,
       });
-      const snapshot = await walkSnapshot(destination);
+      const snapshot = await walkSnapshot(inventoryDestination);
       const events = await readJsonLines(eventsPath);
       const hashSummary = summarizeHashEvents(events);
       const helperResult = parseHelperResult(execution.stdoutTail);

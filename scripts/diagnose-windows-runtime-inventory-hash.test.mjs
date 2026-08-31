@@ -3,9 +3,17 @@ import assert from "node:assert/strict";
 
 import {
   buildInventoryHelperEnvironment,
+  extractedRuntimeDestination,
   parseConcurrencyList,
   summarizeHashEvents,
 } from "./diagnose-windows-runtime-inventory-hash.mjs";
+
+test("walks the archive root that the sequential extractor materializes", () => {
+  assert.equal(
+    extractedRuntimeDestination("C:\\runner\\temp\\extracted"),
+    "C:\\runner\\temp\\extracted\\agentera-runtime",
+  );
+});
 
 test("parses a bounded, duplicate-free hash concurrency list", () => {
   assert.deepEqual(parseConcurrencyList("32, 8,4,1"), [32, 8, 4, 1]);
