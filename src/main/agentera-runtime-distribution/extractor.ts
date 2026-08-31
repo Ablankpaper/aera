@@ -5,7 +5,6 @@ import { pipeline } from "node:stream/promises";
 import { Writable } from "node:stream";
 import { createZstdDecompress } from "node:zlib";
 
-import { extract as extractZip } from "@electron-internal/extract-zip";
 import { Parser, x as extractTar, type ReadEntry } from "tar";
 import {
   fromRandomAccessReaderPromise,
@@ -647,7 +646,12 @@ async function extractZipArchive(
         { signal },
       );
     } else {
-      await extractZip(archivePath, { dir: workDirectory });
+      // Keep the native binding out of the Electron main-process startup
+      // graph.  On Windows the packaged path above runs in a dedicated
+      // ELECTRON_RUN_AS_NODE helper; importing the binding before the ASAR
+      // bypass is enabled can poison that child-process boundary.
+      const { extract } = await import("@electron-internal/extract-zip");
+      await extract(archivePath, { dir: workDirectory });
     }
     throwIfAborted(signal);
     const children = await readdir(workDirectory);

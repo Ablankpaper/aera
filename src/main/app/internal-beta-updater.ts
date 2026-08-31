@@ -30,8 +30,6 @@ import {
 } from "node:path";
 import { promisify } from "node:util";
 
-import { extract as extractZip } from "@electron-internal/extract-zip";
-
 import {
   canonicalJsonBytes,
   parseJsonObjectRejectDuplicates,
@@ -1479,13 +1477,15 @@ type DesktopUpdateZipExtractor = (
 export async function extractDesktopUpdateZip(
   archivePath: string,
   stagingDirectory: string,
-  extractor: DesktopUpdateZipExtractor = extractZip,
+  extractor?: DesktopUpdateZipExtractor,
 ): Promise<void> {
   const electronProcess = process as NodeJS.Process & { noAsar?: boolean };
   const previousNoAsar = electronProcess.noAsar;
   electronProcess.noAsar = true;
   try {
-    await extractor(archivePath, { dir: stagingDirectory });
+    const selectedExtractor =
+      extractor ?? (await import("@electron-internal/extract-zip")).extract;
+    await selectedExtractor(archivePath, { dir: stagingDirectory });
   } finally {
     electronProcess.noAsar = previousNoAsar;
   }

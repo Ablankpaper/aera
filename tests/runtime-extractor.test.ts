@@ -394,7 +394,7 @@ describe("Runtime Seed extractor", () => {
     );
   });
 
-  it("uses the packaged native parallel extractor for Windows ZIP writes", async () => {
+  it("does not eagerly load the native ZIP binding in the main process", async () => {
     const source = await readFile(
       join(
         process.cwd(),
@@ -403,14 +403,11 @@ describe("Runtime Seed extractor", () => {
       "utf8",
     );
 
-    expect(source).toMatch(
-      /import\s*\{\s*extract\s+as\s+extractZip\s*\}\s*from\s*"@electron-internal\/extract-zip"/u,
-    );
     expect(source).not.toMatch(
-      /import\s+extractZip\s+from\s+"@electron-internal\/extract-zip"/u,
+      /^\s*import\s*\{[^\n]*extract[^\n]*\}\s*from\s*["']@electron-internal\/extract-zip["']/mu,
     );
     expect(source).toMatch(
-      /await\s+extractZip\(archivePath,\s*\{\s*dir:\s*workDirectory\s*\}\)/u,
+      /await\s+import\(\s*["']@electron-internal\/extract-zip["']\s*\)/u,
     );
   });
 

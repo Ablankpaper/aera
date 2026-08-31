@@ -1217,6 +1217,20 @@ describe("Internal Beta desktop updater", () => {
     }
   });
 
+  it("does not eagerly load the native ZIP binding during main-process startup", async () => {
+    const source = await readFile(
+      join(process.cwd(), "src/main/app/internal-beta-updater.ts"),
+      "utf8",
+    );
+
+    expect(source).not.toMatch(
+      /^\s*import\s*\{[^\n]*extract[^\n]*\}\s*from\s*["']@electron-internal\/extract-zip["']/mu,
+    );
+    expect(source).toMatch(
+      /await\s+import\(\s*["']@electron-internal\/extract-zip["']\s*\)/u,
+    );
+  });
+
   it("restores Electron ASAR interception after extraction fails", async () => {
     const electronProcess = process as NodeJS.Process & { noAsar?: boolean };
     const previousNoAsar = electronProcess.noAsar;
