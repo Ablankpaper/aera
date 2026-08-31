@@ -1,7 +1,8 @@
 import { appendFileSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
+import { availableParallelism } from "node:os";
 import { pathToFileURL } from "node:url";
-import { isAbsolute, join, win32 } from "node:path";
+import { basename, isAbsolute, join, win32 } from "node:path";
 
 const HELPER_MARKER = "AGENTERA_RUNTIME_ARCHIVE_EXTRACTION_HELPER";
 const DIAGNOSTIC_OUTPUT = "AGENTERA_RUNTIME_INVENTORY_DIAGNOSTIC_OUTPUT";
@@ -104,7 +105,12 @@ async function loadExtractor(): Promise<
 }
 
 async function main(): Promise<void> {
-  helperDiagnostic("archive-extraction-helper-main-start");
+  helperDiagnostic("archive-extraction-helper-main-start", {
+    availableParallelism: availableParallelism(),
+    cwdLength: process.cwd().length,
+    execPathBasename: basename(process.execPath),
+    noAsar: Boolean((process as NodeJS.Process & { noAsar?: boolean }).noAsar),
+  });
   if (process.env[HELPER_MARKER] !== "1" || process.argv.length !== 3) {
     throw new Error("invalid invocation");
   }
@@ -129,10 +135,15 @@ async function main(): Promise<void> {
   const extract = await loadExtractor();
   helperDiagnostic("archive-extraction-helper-load-complete");
   const startedAt = Date.now();
+  const startedCpu = process.cpuUsage();
   helperDiagnostic("archive-extraction-helper-extract-start");
   const heartbeat = setInterval(() => {
+    const cpu = process.cpuUsage(startedCpu);
     helperDiagnostic("archive-extraction-helper-extract-heartbeat", {
       durationMs: Math.max(0, Date.now() - startedAt),
+      availableParallelism: availableParallelism(),
+      cpuUserMicros: cpu.user,
+      cpuSystemMicros: cpu.system,
     });
   }, 5_000);
   heartbeat.unref?.();
@@ -143,6 +154,9 @@ async function main(): Promise<void> {
   }
   helperDiagnostic("archive-extraction-helper-result-written", {
     durationMs: Math.max(0, Date.now() - startedAt),
+    availableParallelism: availableParallelism(),
+    cpuUserMicros: process.cpuUsage(startedCpu).user,
+    cpuSystemMicros: process.cpuUsage(startedCpu).system,
   });
   process.stdout.write('{"schemaVersion":1,"ok":true}\n');
 }

@@ -103,6 +103,7 @@ async function runInApplication({
   app,
   archivePath,
   resourcesPath,
+  noOpModulePath,
   timeoutMs,
 }) {
   return app.evaluate(
@@ -125,18 +126,21 @@ async function runInApplication({
           name: "app-user-data-noasar",
           noAsar: true,
           launchMode: "exec-file",
+          moduleOverridePath: null,
           destinationRoot: probeRoot,
         },
         {
           name: "app-user-data-plain",
           noAsar: false,
           launchMode: "exec-file",
+          moduleOverridePath: null,
           destinationRoot: probeRoot,
         },
         {
           name: "app-temp-noasar",
           noAsar: true,
           launchMode: "exec-file",
+          moduleOverridePath: null,
           destinationRoot: pathModule.join(
             await fs.mkdtemp(
               pathModule.join(os.tmpdir(), "aera-app-temp-probe-"),
@@ -145,15 +149,24 @@ async function runInApplication({
           ),
         },
         {
+          name: "app-user-data-noasar-noop",
+          noAsar: true,
+          launchMode: "exec-file",
+          moduleOverridePath: noOpModulePath,
+          destinationRoot: probeRoot,
+        },
+        {
           name: "app-user-data-noasar-spawn",
           noAsar: true,
           launchMode: "spawn",
+          moduleOverridePath: null,
           destinationRoot: probeRoot,
         },
         {
           name: "app-user-data-noasar-exec-no-options",
           noAsar: true,
           launchMode: "exec-file-no-options",
+          moduleOverridePath: null,
           destinationRoot: probeRoot,
         },
       ];
@@ -192,6 +205,12 @@ async function runInApplication({
           const environment = {
             ...config.helperEnvironment,
             [config.diagnosticOutputName]: eventsPath,
+            ...(variant.moduleOverridePath
+              ? {
+                  AGENTERA_RUNTIME_EXTRACT_ZIP_MODULE_PATH:
+                    variant.moduleOverridePath,
+                }
+              : {}),
           };
           process.noAsar = variant.noAsar;
           const startedAt = Date.now();
@@ -353,6 +372,7 @@ async function runInApplication({
             name: variant.name,
             noAsar: variant.noAsar,
             launchMode: variant.launchMode,
+            moduleOverride: Boolean(variant.moduleOverridePath),
             appUserDataLength: appUserData.length,
             appUserDataRoot: pathModule.parse(appUserData).root,
             destinationLength: destination.length,
@@ -418,7 +438,7 @@ async function main() {
   await writeFile(outputPath, "", { flag: "w", mode: 0o600 });
   emit(outputPath, "app-diagnostic-start", {
     timeoutMs,
-    variants: 5,
+    variants: 6,
     helper: redactedShape(helper, [electronPath, resourcesPath, archivePath]),
   });
   const temporaryRoot = await mkdtemp(
@@ -426,6 +446,12 @@ async function main() {
   );
   const userData = join(temporaryRoot, "user-data");
   const hermesHome = join(temporaryRoot, "hermes-home");
+  const noOpModulePath = join(temporaryRoot, "runtime-extractor-noop.mjs");
+  await writeFile(
+    noOpModulePath,
+    "export async function extract() {}\nexport default extract;\n",
+    { flag: "wx", mode: 0o600 },
+  );
   await mkdir(userData, { recursive: true, mode: 0o700 });
   await mkdir(hermesHome, { recursive: true, mode: 0o700 });
   let app = null;
@@ -453,6 +479,7 @@ async function main() {
       app,
       archivePath,
       resourcesPath,
+      noOpModulePath,
       timeoutMs,
     });
     emit(outputPath, "app-diagnostic-result", {
