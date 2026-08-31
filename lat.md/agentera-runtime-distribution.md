@@ -264,6 +264,12 @@ With the explicit inventory diagnostic output enabled, final extracted verificat
 
 [[src/main/agentera-runtime-distribution/health.ts#runIsolatedRuntimeHealthCheck]] keeps every offline version, command-surface, and required-import probe fail-closed. Windows receives a bounded 120-second cold-start allowance because Defender can keep a newly extracted 14k-entry Runtime busy after inventory verification; macOS and Linux remain bounded at 45 seconds, and explicit test timeouts still override either platform default. The gating probe always keeps the production command line. An investigative `-X importtime` waterfall is available only with the explicit `AGENTERA_E2E_IMPORTTIME=1` opt-in, so diagnostic acceptance cannot perturb the health result or its cold-start budget.
 
+##### Windows native extraction boundary diagnostic
+
+The extraction-only diagnostic compares packaged native ZIP extraction with a sequential control on the exact verified Seed archive.
+
+The dispatch-only evidence tooling in `scripts/diagnose-windows-runtime-extraction.mjs` and `.github/workflows/beta38-windows-runtime-extraction-diagnostic.yml` polls only run-owned output counts and bytes. It never invokes the installer, Gateway, health check, or final inventory verifier. A parent-owned timeout terminates each isolated child before its temporary directory is removed, so a native timeout with a completed control extraction identifies the native write/metadata boundary without authorizing a ZIP or Runtime Seed change.
+
 #### Health child-process lifecycle evidence
 
 When diagnostics are enabled, each isolated health probe records its child lifecycle and timeout state so a packaged stall can be classified from evidence rather than timing assumptions.
