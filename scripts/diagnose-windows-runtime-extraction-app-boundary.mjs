@@ -85,6 +85,71 @@ function helperPath(resourcesPath) {
   );
 }
 
+async function writeSequentialExtractorModule(modulePath, yauzlPath) {
+  await writeFile(
+    modulePath,
+    `import { createWriteStream } from "node:fs";
+import { mkdir, symlink } from "node:fs/promises";
+import { createRequire } from "node:module";
+import { dirname, isAbsolute, join, relative } from "node:path";
+import { pipeline } from "node:stream/promises";
+
+const yauzl = createRequire(import.meta.url)(${JSON.stringify(yauzlPath)});
+
+function archivePath(name) {
+  if (name.includes("\\\\") || name.includes("\\0") || name.startsWith("/") || /^[A-Za-z]:/u.test(name)) {
+    throw new Error("unsafe archive member");
+  }
+  const parts = name.split("/");
+  if (parts[0] !== "agentera-runtime" || parts.some((part) => part === "..")) {
+    throw new Error("archive member is outside the Runtime root");
+  }
+  return parts.filter(Boolean).join("/");
+}
+
+function contained(root, target) {
+  const value = relative(root, target);
+  return value.length > 0 && value !== ".." && !value.startsWith("..\\\\") && !isAbsolute(value);
+}
+
+function openArchive(archive) {
+  return new Promise((resolve, reject) => {
+    yauzl.open(archive, { lazyEntries: true, decodeStrings: true, validateEntrySizes: true, strictFileNames: true }, (error, zipfile) => {
+      if (error || !zipfile) reject(error ?? new Error("cannot open archive"));
+      else resolve(zipfile);
+    });
+  });
+}
+
+export async function extract(archive, options) {
+  if (!options || typeof options.dir !== "string" || !isAbsolute(options.dir)) {
+    throw new Error("invalid extraction destination");
+  }
+  const zipfile = await openArchive(archive);
+  try {
+    for await (const entry of zipfile.eachEntry()) {
+      const name = archivePath(entry.fileName);
+      const target = join(options.dir, ...name.split("/"));
+      if (!contained(options.dir, target)) throw new Error("archive member escapes destination");
+      if (entry.fileName.endsWith("/")) {
+        await mkdir(target, { recursive: true });
+        continue;
+      }
+      await mkdir(dirname(target), { recursive: true });
+      const stream = await zipfile.openReadStreamPromise(entry);
+      await pipeline(stream, createWriteStream(target, { flags: "wx" }));
+    }
+  } finally {
+    zipfile.close();
+  }
+}
+
+export default extract;
+`,
+    { flag: "wx", mode: 0o600 },
+  );
+}
+
 function makeProbeEnvironment(source) {
   const result = {
     ELECTRON_RUN_AS_NODE: "1",
@@ -104,6 +169,7 @@ async function runInApplication({
   archivePath,
   resourcesPath,
   noOpModulePath,
+  sequentialModulePath,
   timeoutMs,
 }) {
   return app.evaluate(
@@ -137,6 +203,17 @@ async function runInApplication({
           moduleOverridePath: config.noOpModulePath,
           destinationRoot: probeRoot,
         },
+        ...(config.sequentialModulePath
+          ? [
+              {
+                name: "app-user-data-noasar-yauzl",
+                noAsar: true,
+                launchMode: "exec-file",
+                moduleOverridePath: config.sequentialModulePath,
+                destinationRoot: probeRoot,
+              },
+            ]
+          : []),
         {
           name: "app-user-data-noasar-utility",
           noAsar: true,
@@ -491,6 +568,7 @@ async function runInApplication({
       helperEnvironment: makeProbeEnvironment(process.env),
       diagnosticOutputName: DIAGNOSTIC_OUTPUT,
       noOpModulePath,
+      sequentialModulePath,
       timeoutMs,
     },
   );
@@ -504,6 +582,9 @@ async function main() {
     "--resources",
   );
   const archivePath = requiredAbsolute(values.get("archive"), "--archive");
+  const yauzlPath = values.has("yauzl")
+    ? requiredAbsolute(values.get("yauzl"), "--yauzl")
+    : null;
   const outputPath = requiredAbsolute(values.get("output"), "--output");
   const timeoutMs = values.has("timeout-ms")
     ? parsePositiveInteger(values.get("timeout-ms"), "--timeout-ms")
@@ -515,6 +596,9 @@ async function main() {
   ]) {
     if (!existsSync(candidate)) throw new Error(`${label} does not exist`);
   }
+  if (yauzlPath && !existsSync(yauzlPath)) {
+    throw new Error("yauzl module does not exist");
+  }
   const helper = helperPath(resourcesPath);
   if (!existsSync(helper))
     throw new Error("packaged extraction helper is missing");
@@ -522,7 +606,7 @@ async function main() {
   await writeFile(outputPath, "", { flag: "w", mode: 0o600 });
   emit(outputPath, "app-diagnostic-start", {
     timeoutMs,
-    variants: 7,
+    variants: yauzlPath ? 8 : 7,
     helper: redactedShape(helper, [electronPath, resourcesPath, archivePath]),
   });
   const temporaryRoot = await mkdtemp(
@@ -531,11 +615,17 @@ async function main() {
   const userData = join(temporaryRoot, "user-data");
   const hermesHome = join(temporaryRoot, "hermes-home");
   const noOpModulePath = join(temporaryRoot, "runtime-extractor-noop.mjs");
+  const sequentialModulePath = yauzlPath
+    ? join(temporaryRoot, "runtime-extractor-yauzl.mjs")
+    : null;
   await writeFile(
     noOpModulePath,
     "export async function extract() {}\nexport default extract;\n",
     { flag: "wx", mode: 0o600 },
   );
+  if (sequentialModulePath && yauzlPath) {
+    await writeSequentialExtractorModule(sequentialModulePath, yauzlPath);
+  }
   await mkdir(userData, { recursive: true, mode: 0o700 });
   await mkdir(hermesHome, { recursive: true, mode: 0o700 });
   let app = null;
@@ -564,6 +654,7 @@ async function main() {
       archivePath,
       resourcesPath,
       noOpModulePath,
+      sequentialModulePath,
       timeoutMs,
     });
     emit(outputPath, "app-diagnostic-result", {

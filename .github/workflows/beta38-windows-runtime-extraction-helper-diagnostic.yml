@@ -135,8 +135,9 @@ jobs:
             --electron (Join-Path $app 'Aera.exe') `
             --resources $resources `
             --archive $packagedArchive[0].FullName `
+            --yauzl (Join-Path $env:GITHUB_WORKSPACE 'node_modules/yauzl/index.js') `
             --output (Join-Path $evidence 'packaged-app-boundary.jsonl') `
-            --timeout-ms 45000
+            --timeout-ms 180000
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Summarize helper boundary evidence

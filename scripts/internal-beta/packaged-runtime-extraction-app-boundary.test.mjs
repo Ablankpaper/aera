@@ -14,9 +14,11 @@ test("passes the no-op extractor path into the packaged app evaluation", async (
 
   assert.match(
     source,
-    /app\.evaluate\([\s\S]*?noOpModulePath,\s*\n\s*timeoutMs,\s*\n\s*\},\s*\n\s*\);/u,
+    /app\.evaluate\([\s\S]*?noOpModulePath,[\s\S]*?timeoutMs,[\s\S]*?\},\s*\n\s*\);/u,
   );
   assert.match(source, /moduleOverridePath:\s*config\.noOpModulePath/u);
+  assert.match(source, /sequentialModulePath/u);
+  assert.match(source, /name: "app-user-data-noasar-yauzl"/u);
   assert.match(
     source,
     /moduleBuiltin\.createRequire\([\s\S]*?\)\(\s*["']electron["']\s*\)/u,
