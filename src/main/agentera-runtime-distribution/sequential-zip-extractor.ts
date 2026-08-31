@@ -1,9 +1,9 @@
 import { createWriteStream } from "node:fs";
-import { lstat, mkdir, open, symlink } from "node:fs/promises";
+import { lstat, mkdir, symlink } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, win32 } from "node:path";
 import { pipeline } from "node:stream/promises";
 
-import { fromFdPromise, type Entry as ZipEntry, type ZipFile } from "yauzl";
+import { openPromise, type Entry as ZipEntry, type ZipFile } from "yauzl";
 
 const ARCHIVE_ROOT = "agentera-runtime";
 // Keep the helper-side bound identical to the signed archive validator. The
@@ -153,11 +153,11 @@ async function readSymlinkTarget(
     }
     chunks.push(bytes);
   }
-  return Buffer.concat(chunks).toString("utf8").replace(/\0+$/u, "");
+  return Buffer.concat(chunks).toString("utf8");
 }
 
 function symlinkTargetWithinRoot(
-  root: string,
+  archiveRoot: string,
   parent: string,
   target: string,
   pending: ReadonlyMap<string, string>,
@@ -172,7 +172,7 @@ function symlinkTargetWithinRoot(
     throw new SequentialZipExtractionError("Runtime symlink target is invalid");
   }
   let current = resolve(parent, target);
-  const rootPath = resolve(root);
+  const rootPath = resolve(archiveRoot);
   for (let hops = 0; hops <= MAX_SYMLINK_HOPS; hops += 1) {
     assertContained(rootPath, current);
     const key = comparablePath(relative(rootPath, current));
@@ -211,26 +211,22 @@ export async function extractRuntimeArchiveSequentially(
     );
   }
 
-  const archiveHandle = await open(archivePath, "r");
-  let zipfile: ZipFile;
-  try {
-    zipfile = await fromFdPromise(archiveHandle.fd, {
-      lazyEntries: true,
-      decodeStrings: true,
-      validateEntrySizes: true,
-      strictFileNames: true,
-    });
-  } catch (error) {
-    await archiveHandle.close().catch(() => undefined);
-    throw error;
-  }
+  const zipfile: ZipFile = await openPromise(archivePath, {
+    autoClose: true,
+    lazyEntries: true,
+    decodeStrings: true,
+    validateEntrySizes: true,
+    strictFileNames: true,
+  });
   const seen = new Set<string>();
   const safeDirectories = new Set<string>([destinationRoot]);
   const pendingSymlinks: PendingSymlink[] = [];
   const pendingTargets = new Map<string, string>();
+  const archiveRoot = join(destinationRoot, ARCHIVE_ROOT);
   let rootSeen = false;
   try {
     for await (const entry of zipfile.eachEntry()) {
+      const directory = isDirectoryEntry(entry);
       const member = archiveMemberPath(entry.fileName);
       if (member.root) {
         const rootMode = (entry.externalFileAttributes >>> 16) & 0o777;
@@ -260,8 +256,19 @@ export async function extractRuntimeArchiveSequentially(
         ...member.relativePath.split("/"),
       );
       assertContained(destinationRoot, output);
-      const directory = isDirectoryEntry(entry);
       const symlinkEntry = !directory && isSymlinkEntry(entry);
+      const unixMode = (entry.externalFileAttributes >>> 16) & 0xffff;
+      const fileType = unixMode & 0o170000;
+      if (
+        !directory &&
+        !symlinkEntry &&
+        fileType !== 0 &&
+        fileType !== 0o100000
+      ) {
+        throw new SequentialZipExtractionError(
+          `unsupported Runtime archive member type: ${entry.fileName}`,
+        );
+      }
       if (directory) {
         await ensureRealDirectory(destinationRoot, output, safeDirectories);
         continue;
@@ -274,15 +281,10 @@ export async function extractRuntimeArchiveSequentially(
       if (symlinkEntry) {
         const target = await readSymlinkTarget(zipfile, entry);
         const parent = dirname(output);
-        symlinkTargetWithinRoot(
-          destinationRoot,
-          parent,
-          target,
-          pendingTargets,
-        );
+        symlinkTargetWithinRoot(archiveRoot, parent, target, pendingTargets);
         pendingSymlinks.push({ output, parent, target });
         pendingTargets.set(
-          comparablePath(relative(destinationRoot, output)),
+          comparablePath(relative(archiveRoot, output)),
           target,
         );
         continue;
@@ -303,7 +305,7 @@ export async function extractRuntimeArchiveSequentially(
     }
     for (const link of pendingSymlinks) {
       symlinkTargetWithinRoot(
-        destinationRoot,
+        archiveRoot,
         link.parent,
         link.target,
         pendingTargets,
@@ -322,6 +324,5 @@ export async function extractRuntimeArchiveSequentially(
     }
   } finally {
     zipfile.close();
-    await archiveHandle.close().catch(() => undefined);
   }
 }

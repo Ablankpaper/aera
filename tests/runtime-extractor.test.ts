@@ -527,6 +527,51 @@ describe("Runtime Seed extractor", () => {
     });
   });
 
+  it("rejects sequential ZIP symlinks that leave the Runtime root", async () => {
+    const root = await workspace();
+    const value = manifest("windows");
+    const archivePath = await writeZip(
+      root,
+      archiveEntries(value.files, [
+        {
+          name: "agentera-runtime/runtime/escape-link",
+          kind: "symlink",
+          linkTarget: "../../outside",
+        },
+      ]),
+    );
+    const destination = join(root, "payload.zip-extracting");
+    await mkdir(destination, { recursive: false, mode: 0o700 });
+
+    await expect(
+      extractRuntimeArchiveSequentially(archivePath, destination),
+    ).rejects.toThrow(/symlink|target|escape|root/i);
+    await expect(lstat(join(root, "outside"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
+  it("rejects a sequential ZIP symlink target containing a NUL byte", async () => {
+    const root = await workspace();
+    const value = manifest("windows");
+    const archivePath = await writeZip(
+      root,
+      archiveEntries(value.files, [
+        {
+          name: "agentera-runtime/runtime/nul-link",
+          kind: "symlink",
+          linkTarget: "hermes\0",
+        },
+      ]),
+    );
+    const destination = join(root, "payload.zip-extracting");
+    await mkdir(destination, { recursive: false, mode: 0o700 });
+
+    await expect(
+      extractRuntimeArchiveSequentially(archivePath, destination),
+    ).rejects.toThrow(/symlink|target|invalid/i);
+  });
+
   it("bypasses Electron ASAR interception for Windows extraction and restores it", async () => {
     const root = await workspace();
     const value = manifest("windows");
