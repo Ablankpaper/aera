@@ -151,7 +151,7 @@ export default extract;
   );
 }
 
-async function writeCallbackExtractorModule(modulePath, yauzlPath) {
+async function writeCallbackExtractorModule(modulePath, yauzlPath, flags) {
   await writeFile(
     modulePath,
     `import { createWriteStream } from "node:fs";
@@ -229,7 +229,7 @@ export async function extract(archive, options) {
         }
         await mkdir(dirname(target), { recursive: true });
         const stream = await openReadStream(zipfile, entry);
-        await pipeline(stream, createWriteStream(target, { flags: "wx" }));
+        await pipeline(stream, createWriteStream(target, { flags: ${JSON.stringify(flags)} }));
       }).then(
         () => {
           active = false;
@@ -268,6 +268,55 @@ function makeProbeEnvironment(source) {
   return result;
 }
 
+async function walkProbeSnapshot(fs, pathModule, root) {
+  const queue = [root];
+  const samplePaths = [];
+  let files = 0;
+  let directories = 0;
+  let bytes = 0;
+  let entries = 0;
+  let truncated = false;
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current) break;
+    let children;
+    try {
+      children = await fs.readdir(current, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const child of children) {
+      entries += 1;
+      if (entries > 200_000) {
+        truncated = true;
+        return {
+          files,
+          directories,
+          bytes,
+          entries: 200_000,
+          truncated,
+          samplePaths,
+        };
+      }
+      const childPath = pathModule.join(current, child.name);
+      if (samplePaths.length < 64)
+        samplePaths.push(pathModule.relative(root, childPath));
+      if (child.isDirectory()) {
+        directories += 1;
+        queue.push(childPath);
+      } else if (child.isFile()) {
+        files += 1;
+        try {
+          bytes += (await fs.stat(childPath)).size;
+        } catch {
+          // A file may still be in flight.
+        }
+      }
+    }
+  }
+  return { files, directories, bytes, entries, truncated, samplePaths };
+}
+
 async function runInApplication({
   app,
   archivePath,
@@ -275,6 +324,7 @@ async function runInApplication({
   noOpModulePath,
   sequentialModulePath,
   callbackModulePath,
+  callbackWriteModulePath,
   timeoutMs,
   only,
 }) {
@@ -311,6 +361,13 @@ async function runInApplication({
         },
         ...(config.sequentialModulePath
           ? [
+              {
+                name: "app-user-data-noasar-yauzl-callback-w",
+                noAsar: true,
+                launchMode: "exec-file",
+                moduleOverridePath: config.callbackWriteModulePath,
+                destinationRoot: probeRoot,
+              },
               {
                 name: "app-user-data-noasar-yauzl-callback",
                 noAsar: true,
@@ -647,6 +704,7 @@ async function runInApplication({
               return [];
             }
           })();
+          const snapshot = await walkProbeSnapshot(fs, pathModule, destination);
           results.push({
             name: variant.name,
             noAsar: variant.noAsar,
@@ -658,6 +716,7 @@ async function runInApplication({
             destinationRoot: pathModule.parse(destination).root,
             execution,
             helperEvents,
+            snapshot,
           });
           await fs
             .rm(requestDirectory, { recursive: true, force: true })
@@ -689,6 +748,7 @@ async function runInApplication({
       noOpModulePath,
       sequentialModulePath,
       callbackModulePath,
+      callbackWriteModulePath,
       timeoutMs,
       only,
     },
@@ -729,7 +789,7 @@ async function main() {
   emit(outputPath, "app-diagnostic-start", {
     timeoutMs,
     only,
-    variants: yauzlPath ? 9 : 7,
+    variants: yauzlPath ? 10 : 7,
     helper: redactedShape(helper, [electronPath, resourcesPath, archivePath]),
   });
   const temporaryRoot = await mkdtemp(
@@ -744,6 +804,9 @@ async function main() {
   const callbackModulePath = yauzlPath
     ? join(temporaryRoot, "runtime-extractor-yauzl-callback.mjs")
     : null;
+  const callbackWriteModulePath = yauzlPath
+    ? join(temporaryRoot, "runtime-extractor-yauzl-callback-w.mjs")
+    : null;
   await writeFile(
     noOpModulePath,
     "export async function extract() {}\nexport default extract;\n",
@@ -751,7 +814,8 @@ async function main() {
   );
   if (sequentialModulePath && yauzlPath) {
     await writeSequentialExtractorModule(sequentialModulePath, yauzlPath);
-    await writeCallbackExtractorModule(callbackModulePath, yauzlPath);
+    await writeCallbackExtractorModule(callbackModulePath, yauzlPath, "wx");
+    await writeCallbackExtractorModule(callbackWriteModulePath, yauzlPath, "w");
   }
   await mkdir(userData, { recursive: true, mode: 0o700 });
   await mkdir(hermesHome, { recursive: true, mode: 0o700 });
@@ -783,6 +847,7 @@ async function main() {
       noOpModulePath,
       sequentialModulePath,
       callbackModulePath,
+      callbackWriteModulePath,
       timeoutMs,
       only,
     });

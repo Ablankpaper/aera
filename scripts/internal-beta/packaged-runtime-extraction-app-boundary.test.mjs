@@ -1,5 +1,3 @@
-/* eslint-disable @typescript-eslint/explicit-function-return-type */
-
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
@@ -35,6 +33,9 @@ test("includes a callback-driven yauzl control for the Electron app boundary", a
 
   assert.match(source, /callbackModulePath/u);
   assert.match(source, /name: "app-user-data-noasar-yauzl-callback"/u);
+  assert.match(source, /name: "app-user-data-noasar-yauzl-callback-w"/u);
+  assert.match(source, /createWriteStream\(target, \{ flags:/u);
+  assert.match(source, /snapshot/u);
   assert.match(source, /zipfile\.on\(["']entry["']/u);
   assert.match(source, /zipfile\.readEntry\(\)/u);
 });
