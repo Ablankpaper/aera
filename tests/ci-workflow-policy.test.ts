@@ -279,6 +279,10 @@ describe("CI workflow policy", () => {
         "utf8",
       ),
     ).toContain("AERA_RUNTIME_INVENTORY_HASH_CONCURRENCY");
+    expect(
+      readFileSync(resolve("src/main/runtime-inventory-helper.ts"), "utf8"),
+    ).toContain("AERA_RUNTIME_INVENTORY_HASH_FILE_EVENTS");
+    expect(workflow).toContain("--file-events $env:FILE_EVENTS");
     expect(workflow).toContain("actions/upload-artifact@v4");
     expect(workflow).toContain("--win dir --x64 --publish never");
     expect(workflow).toContain("timeout-minutes: 90");

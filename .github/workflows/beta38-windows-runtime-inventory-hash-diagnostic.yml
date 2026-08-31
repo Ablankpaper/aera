@@ -18,6 +18,14 @@ on:
         required: false
         default: 32,8,4,1
         type: string
+      file_events:
+        description: Whether to append one diagnostic event per hashed file
+        required: false
+        default: disabled
+        type: choice
+        options:
+          - disabled
+          - enabled
 
 permissions:
   contents: read
@@ -38,6 +46,7 @@ jobs:
     env:
       SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
       CONCURRENCY_LIST: ${{ inputs.concurrency_list || '32,8,4,1' }}
+      FILE_EVENTS: ${{ inputs.file_events || 'disabled' }}
       MAIN_VITE_AGENTERA_CLOUD_PUBLIC_URL: https://127.0.0.1
       MAIN_VITE_AGENTERA_OFFLINE_PUBLIC_KEYS_JSON: >-
         {"issuer":"https://127.0.0.1","keys":[{"keyId":"diagnostic-v1","publicKey":"C1E62bSSQBXKCQLtB5BE06xdvsIwbwaUjBDajrbjny0"}]}
@@ -121,6 +130,7 @@ jobs:
             --manifest $manifest[0].FullName `
             --output (Join-Path $evidence 'diagnostic.jsonl') `
             --concurrency-list $env:CONCURRENCY_LIST `
+            --file-events $env:FILE_EVENTS `
             --timeout-ms 600000
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 

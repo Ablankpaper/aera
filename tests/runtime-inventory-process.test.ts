@@ -67,6 +67,9 @@ describe("isolated Runtime inventory verification", () => {
         expect(
           options.env.AERA_RUNTIME_INVENTORY_HASH_CONCURRENCY,
         ).toBeUndefined();
+        expect(
+          options.env.AERA_RUNTIME_INVENTORY_HASH_FILE_EVENTS,
+        ).toBeUndefined();
         expect(options.windowsHide).toBe(true);
         return {
           stdout: `${JSON.stringify({

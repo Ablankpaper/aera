@@ -21,6 +21,7 @@ const DIAGNOSTIC_OUTPUT = "AGENTERA_RUNTIME_INVENTORY_DIAGNOSTIC_OUTPUT";
 // diagnostic sink is present, so an ambient user environment cannot alter the
 // production inventory verifier.
 const DIAGNOSTIC_HASH_CONCURRENCY = "AERA_RUNTIME_INVENTORY_HASH_CONCURRENCY";
+const DIAGNOSTIC_HASH_FILE_EVENTS = "AERA_RUNTIME_INVENTORY_HASH_FILE_EVENTS";
 const MAX_DIAGNOSTIC_HASH_CONCURRENCY = 128;
 const EXPECTED_REQUEST_FIELDS = new Set([
   "schemaVersion",
@@ -108,6 +109,13 @@ function diagnosticHashFileObserver(
   };
 }
 
+function diagnosticHashFileEventsEnabled(): boolean {
+  return (
+    diagnosticOutputPath() !== undefined &&
+    process.env[DIAGNOSTIC_HASH_FILE_EVENTS]?.trim() === "1"
+  );
+}
+
 function parseRequest(value: unknown): RuntimeInventoryHelperRequest {
   if (
     !value ||
@@ -172,7 +180,7 @@ async function main(): Promise<void> {
     : undefined;
   const hashConcurrency = diagnosticHashConcurrency();
   const hashFileObserver = diagnosticHashFileObserver(
-    hashConcurrency !== undefined,
+    hashConcurrency !== undefined && diagnosticHashFileEventsEnabled(),
   );
   const result = await verifyExtractedRuntimeInventoryInProcess(
     request.destination,

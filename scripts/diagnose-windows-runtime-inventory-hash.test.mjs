@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   buildInventoryHelperEnvironment,
   extractedRuntimeDestination,
+  parseFileEvents,
   parseConcurrencyList,
   summarizeHashEvents,
 } from "./diagnose-windows-runtime-inventory-hash.mjs";
@@ -12,6 +13,21 @@ test("walks the archive root that the sequential extractor materializes", () => 
   assert.equal(
     extractedRuntimeDestination("C:\\runner\\temp\\extracted"),
     "C:\\runner\\temp\\extracted\\agentera-runtime",
+  );
+});
+
+test("supports disabling per-file events for a production-equivalent probe", () => {
+  assert.equal(parseFileEvents("disabled"), false);
+  assert.equal(parseFileEvents("enabled"), true);
+  assert.throws(() => parseFileEvents("unexpected"), /enabled or disabled/u);
+  assert.equal(
+    buildInventoryHelperEnvironment(
+      { SystemRoot: "C:\\Windows" },
+      "C:\\evidence\\inventory.jsonl",
+      32,
+      false,
+    ).AERA_RUNTIME_INVENTORY_HASH_FILE_EVENTS,
+    "0",
   );
 });
 

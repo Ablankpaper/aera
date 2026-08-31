@@ -32,6 +32,7 @@ const INVENTORY_MARKER = "AGENTERA_RUNTIME_INVENTORY_HELPER";
 const DIAGNOSTIC_OUTPUT = "AGENTERA_RUNTIME_INVENTORY_DIAGNOSTIC_OUTPUT";
 const EXTRACTION_MODE = "AGENTERA_RUNTIME_ARCHIVE_EXTRACTION_MODE";
 const HASH_CONCURRENCY = "AERA_RUNTIME_INVENTORY_HASH_CONCURRENCY";
+const HASH_FILE_EVENTS = "AERA_RUNTIME_INVENTORY_HASH_FILE_EVENTS";
 
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 const TERMINATION_TIMEOUT_MS = 15_000;
@@ -69,6 +70,15 @@ export function parseConcurrencyList(value) {
     throw new Error("concurrency list contains a duplicate");
   }
   return result;
+}
+
+export function parseFileEvents(value) {
+  const normalized = String(value ?? "enabled")
+    .trim()
+    .toLowerCase();
+  if (normalized === "enabled") return true;
+  if (normalized === "disabled") return false;
+  throw new Error("file events must be enabled or disabled");
 }
 
 function requiredAbsolute(value, name) {
@@ -131,6 +141,7 @@ export function buildInventoryHelperEnvironment(
   source,
   outputPath,
   concurrency,
+  fileEvents,
 ) {
   const result = {
     ELECTRON_RUN_AS_NODE: "1",
@@ -141,6 +152,9 @@ export function buildInventoryHelperEnvironment(
   for (const key of ["SystemRoot", "WINDIR", "TEMP", "TMP"]) {
     const value = envValue(source, key);
     if (value) result[key] = value;
+  }
+  if (fileEvents !== undefined) {
+    result[HASH_FILE_EVENTS] = fileEvents ? "1" : "0";
   }
   return result;
 }
@@ -546,6 +560,7 @@ async function parentMain(values) {
     ? parsePositiveInteger(values.get("timeout-ms"), "--timeout-ms")
     : DEFAULT_TIMEOUT_MS;
   const concurrencyList = parseConcurrencyList(values.get("concurrency-list"));
+  const fileEvents = parseFileEvents(values.get("file-events"));
 
   for (const [label, candidate] of [
     ["Electron executable", electronPath],
@@ -602,6 +617,7 @@ async function parentMain(values) {
     archiveBytes: (await stat(archivePath)).size,
     timeoutMs,
     concurrencies: concurrencyList,
+    fileEvents: fileEvents ? "enabled" : "disabled",
   });
 
   try {
@@ -665,6 +681,7 @@ async function parentMain(values) {
           process.env,
           eventsPath,
           concurrency,
+          fileEvents,
         ),
         timeoutMs,
         privateValues,

@@ -296,13 +296,16 @@ extraction helper, then invokes the shipped inventory helper against that
 unchanged tree with explicit hash-pool sizes (32, 8, 4, and 1 by default).
 `scripts/diagnose-windows-runtime-inventory-hash.mjs` keeps each run
 credential-free and records path-free walk/hash phase events plus a per-file
-start/complete/error timeline. The diagnostic-only
+start/complete/error timeline when explicitly enabled. The diagnostic-only
 `AERA_RUNTIME_INVENTORY_HASH_CONCURRENCY` control is honored only when an
 absolute diagnostic sink is present; the production parent never forwards it,
 so normal verification behavior and its Windows default remain unchanged.
 The sequential extractor materializes the archive's `agentera-runtime` root
 below its requested destination, so the probe passes that materialized root to
 the inventory helper and snapshots it separately from the extraction parent.
+The `--file-events disabled` mode omits the synchronous per-file sink and is
+the production-equivalent scheduling control; the default enabled mode is kept
+for path-free file lifecycle evidence.
 Timeouts terminate the helper before the evidence snapshot and leave the
 pending file indices and redacted process sample in the uploaded artifact.
 
